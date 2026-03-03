@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<!--
+╔══════════════════════════════════════════════════════════════════════════╗
+║  VIBE CODING SPEC DEMO v1.0 — 2026-03-03                                ║
+║  此頁面為 VIBE_CODING_SPEC.md 的完整示範實現                             ║
+║                                                                          ║
+║  Layout:       Magazine Layout + Z-Pattern 視線動線                      ║
+║  Motion:       Reveal on Scroll + Parallax + Scrollytelling              ║
+║  Texture:      Grain Texture + Glassmorphism + Soft Shadow               ║
+║  Feedback:     Micro-interactions + Toast Notification + Skeleton Screen ║
+║  Flow:         Onboarding Flow + Empty State + Seamless Transition       ║
+║  Goal:         Elegance + Professional + Minimalist                      ║
+╚══════════════════════════════════════════════════════════════════════════╝
+-->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vibe Coding Demo — 高質感 Web 設計規範示範</title>
+<style>
+  /* ─── CSS 變量系統 ─── */
+  :root {
+    --bg-primary: #0d0d0f;
+    --bg-secondary: #141418;
+    --bg-card: rgba(255,255,255,0.04);
+    --text-primary: #f0f0f4;
+    --text-secondary: #8a8a9a;
+    --text-muted: #4a4a5a;
+    --accent: #7c6cf7;
+    --accent-soft: rgba(124,108,247,0.15);
+    --accent-2: #34d399;
+    --border: rgba(255,255,255,0.08);
+    --shadow-soft: 0 4px 24px rgba(0,0,0,0.4), 0 1px 4px rgba(0,0,0,0.2);
+    --shadow-hover: 0 8px 40px rgba(0,0,0,0.5), 0 2px 8px rgba(124,108,247,0.2);
+    --radius: 16px;
+    --radius-sm: 8px;
+    --transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* ─── 重置 ─── */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+    line-height: 1.6;
+    overflow-x: hidden;
+  }
+
+  /* ─── Grain Texture 顆粒紋理 ─── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 9999;
+    opacity: 0.5;
+  }
+
+  /* ─── Parallax Hero ─── */
+  .hero {
+    position: relative;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    padding: 120px 48px 80px;
+  }
+  .hero-bg {
+    position: absolute;
+    inset: -20%;
+    background: radial-gradient(ellipse 80% 60% at 60% 40%, rgba(124,108,247,0.18) 0%, transparent 70%),
+                radial-gradient(ellipse 50% 40% at 20% 80%, rgba(52,211,153,0.1) 0%, transparent 60%),
+                var(--bg-primary);
+    will-change: transform;
+    transition: transform 0.1s linear;
+  }
+  .hero-content {
+    position: relative;
+    z-index: 1;
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 80px;
+    align-items: center;
+  }
+  .hero-label {
+    display: inline-block;
+    padding: 6px 14px;
+    background: var(--accent-soft);
+    border: 1px solid rgba(124,108,247,0.3);
+    border-radius: 100px;
+    font-size: 0.75rem;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 24px;
+  }
+  .hero-title {
+    font-size: clamp(2.5rem, 5vw, 4.5rem);
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -0.03em;
+    margin-bottom: 24px;
+  }
+  .hero-title span {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .hero-desc {
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    margin-bottom: 40px;
+    max-width: 480px;
+  }
+  .hero-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 28px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 100px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    text-decoration: none;
+    cursor: pointer;
+    border: none;
+    transition: transform var(--transition), box-shadow var(--transition), background var(--transition);
+  }
+  .hero-cta:hover {
+    transform: scale(1.04);
+    box-shadow: 0 8px 32px rgba(124,108,247,0.4);
+    background: #9080ff;
+  }
+  .hero-cta:active { transform: scale(0.98); }
+  .hero-visual {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* ─── Skeleton Screen ─── */
+  .skeleton {
+    background: linear-gradient(90deg, var(--bg-card) 25%, rgba(255,255,255,0.06) 50%, var(--bg-card) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.8s infinite;
+    border-radius: var(--radius-sm);
+  }
+  @keyframes skeleton-shimmer {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+  .skeleton-card {
+    padding: 20px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .skeleton-line { height: 12px; margin-bottom: 10px; }
+  .skeleton-line.short { width: 60%; }
+  .skeleton-line.medium { width: 80%; }
+  .skeleton-line.full { width: 100%; }
+  .skeleton-avatar { width: 40px; height: 40px; border-radius: 50%; margin-bottom: 16px; }
+
+  /* ─── 主容器 ─── */
+  .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 48px;
+  }
+
+  /* ─── Section 通用 ─── */
+  section { padding: 120px 48px; }
+  .section-label {
+    font-size: 0.75rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 16px;
+  }
+  .section-title {
+    font-size: clamp(1.8rem, 3vw, 2.8rem);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 20px;
+  }
+  .section-desc {
+    font-size: 1rem;
+    color: var(--text-secondary);
+    max-width: 560px;
+    margin-bottom: 60px;
+  }
+
+  /* ─── Reveal on Scroll 動畫 ─── */
+  .reveal {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.7s ease-out, transform 0.7s ease-out;
+  }
+  .reveal.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .reveal-delay-1 { transition-delay: 0.1s; }
+  .reveal-delay-2 { transition-delay: 0.2s; }
+  .reveal-delay-3 { transition-delay: 0.3s; }
+  .reveal-delay-4 { transition-delay: 0.4s; }
+
+  /* ─── Magazine Layout — 特性區塊 ─── */
+  .features-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr;
+    grid-template-rows: auto auto;
+    gap: 20px;
+  }
+  .feature-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+    cursor: pointer;
+    transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition);
+    position: relative;
+    overflow: hidden;
+  }
+  .feature-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at top left, var(--accent-soft), transparent 60%);
+    opacity: 0;
+    transition: opacity var(--transition);
+  }
+  .feature-card:hover {
+    transform: translateY(-4px) scale(1.01);
+    box-shadow: var(--shadow-hover);
+    border-color: rgba(124,108,247,0.3);
+  }
+  .feature-card:hover::before { opacity: 1; }
+  .feature-card:active { transform: scale(0.99); }
+  .feature-card.large { grid-row: span 2; }
+  .feature-icon {
+    width: 44px;
+    height: 44px;
+    background: var(--accent-soft);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+    margin-bottom: 20px;
+  }
+  .feature-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+  }
+  .feature-desc {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+  }
+  .feature-card.large .feature-title { font-size: 1.5rem; margin-bottom: 16px; }
+  .feature-card.large .feature-desc { font-size: 0.95rem; }
+
+  /* ─── Glassmorphism 卡片 ─── */
+  .glass-card {
+    background: rgba(255,255,255,0.05);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: var(--radius);
+    padding: 32px;
+  }
+
+  /* ─── Scrollytelling 區塊 ─── */
+  .scrollytelling {
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .scrollytelling-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 80px;
+    align-items: start;
+  }
+  .scrollytelling-steps { position: sticky; top: 120px; }
+  .step {
+    padding: 24px;
+    border-left: 2px solid var(--border);
+    margin-bottom: 24px;
+    transition: border-color var(--transition), background var(--transition);
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  }
+  .step.active {
+    border-left-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .step-number {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+  }
+  .step.active .step-number { color: var(--accent); }
+  .step-title { font-size: 1rem; font-weight: 600; margin-bottom: 6px; }
+  .step-desc { font-size: 0.875rem; color: var(--text-secondary); }
+  .scrollytelling-content { padding: 60px 0; }
+  .scroll-panel {
+    min-height: 60vh;
+    display: flex;
+    align-items: center;
+    padding: 40px 0;
+  }
+  .scroll-visual {
+    width: 100%;
+    aspect-ratio: 4/3;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 3rem;
+    transition: all 0.5s ease;
+  }
+
+  /* ─── Timeline Layout ─── */
+  .timeline { position: relative; padding-left: 40px; }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 8px;
+    bottom: 8px;
+    width: 2px;
+    background: linear-gradient(to bottom, var(--accent), transparent);
+  }
+  .timeline-item {
+    position: relative;
+    margin-bottom: 48px;
+  }
+  .timeline-item::before {
+    content: '';
+    position: absolute;
+    left: -36px;
+    top: 6px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 4px var(--accent-soft);
+  }
+  .timeline-date {
+    font-size: 0.75rem;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    margin-bottom: 8px;
+  }
+  .timeline-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 8px; }
+  .timeline-desc { font-size: 0.875rem; color: var(--text-secondary); }
+
+  /* ─── Micro-interactions 按鈕展示 ─── */
+  .btn-group { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 32px; }
+  .btn {
+    padding: 12px 24px;
+    border-radius: 100px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: none;
+    transition: transform var(--transition), box-shadow var(--transition), background var(--transition);
+  }
+  .btn:active { transform: scale(0.97) !important; }
+  .btn-primary {
+    background: var(--accent);
+    color: #fff;
+  }
+  .btn-primary:hover {
+    transform: scale(1.04);
+    box-shadow: 0 6px 24px rgba(124,108,247,0.4);
+    background: #9080ff;
+  }
+  .btn-secondary {
+    background: transparent;
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+  }
+  .btn-secondary:hover {
+    transform: scale(1.03);
+    border-color: rgba(255,255,255,0.2);
+    background: rgba(255,255,255,0.05);
+  }
+  .btn-ghost {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .btn-ghost:hover {
+    transform: scale(1.03);
+    background: rgba(124,108,247,0.25);
+  }
+
+  /* ─── Toast Notification ─── */
+  #toast-container {
+    position: fixed;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+    pointer-events: none;
+  }
+  .toast {
+    background: #1a1a1f;
+    color: #f0f0f4;
+    padding: 14px 24px;
+    border-radius: 100px;
+    font-size: 0.875rem;
+    font-weight: 500;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.08);
+    animation: toast-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    white-space: nowrap;
+  }
+  .toast.toast-out {
+    animation: toast-out 0.3s ease-in forwards;
+  }
+  @keyframes toast-in {
+    from { opacity: 0; transform: translateY(20px) scale(0.9); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  @keyframes toast-out {
+    from { opacity: 1; transform: translateY(0) scale(1); }
+    to { opacity: 0; transform: translateY(-10px) scale(0.95); }
+  }
+  .toast-icon { font-size: 1rem; }
+
+  /* ─── Onboarding Modal ─── */
+  #onboarding {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(8px);
+    z-index: 9000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    animation: fade-in 0.3s ease;
+  }
+  #onboarding.hidden { display: none; }
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  .onboarding-card {
+    background: #1a1a1f;
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 48px;
+    max-width: 520px;
+    width: 100%;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.6);
+    animation: slide-up 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+  @keyframes slide-up {
+    from { opacity: 0; transform: translateY(30px) scale(0.95); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .onboarding-progress {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 40px;
+  }
+  .progress-dot {
+    height: 4px;
+    flex: 1;
+    background: var(--border);
+    border-radius: 2px;
+    transition: background 0.3s;
+  }
+  .progress-dot.active { background: var(--accent); }
+  .progress-dot.done { background: var(--accent-2); }
+  .onboarding-step { display: none; }
+  .onboarding-step.active { display: block; }
+  .onboarding-emoji { font-size: 3rem; margin-bottom: 20px; }
+  .onboarding-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 12px; }
+  .onboarding-desc { color: var(--text-secondary); margin-bottom: 32px; line-height: 1.7; }
+  .onboarding-actions { display: flex; justify-content: space-between; align-items: center; }
+  .onboarding-skip { font-size: 0.875rem; color: var(--text-muted); cursor: pointer; background: none; border: none; color: var(--text-secondary); transition: color var(--transition); }
+  .onboarding-skip:hover { color: var(--text-primary); }
+
+  /* ─── Empty State ─── */
+  .empty-state {
+    text-align: center;
+    padding: 80px 40px;
+    background: var(--bg-card);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+  }
+  .empty-state-emoji { font-size: 4rem; margin-bottom: 24px; display: block; }
+  .empty-state-title { font-size: 1.2rem; font-weight: 600; margin-bottom: 12px; }
+  .empty-state-desc { color: var(--text-secondary); margin-bottom: 28px; font-size: 0.9rem; }
+
+  /* ─── 頁面轉場 ─── */
+  .page-transition {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-primary);
+    z-index: 8000;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+  }
+  .page-transition.active { opacity: 1; }
+
+  /* ─── 導航 ─── */
+  nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    padding: 20px 48px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: background 0.3s, backdrop-filter 0.3s;
+  }
+  nav.scrolled {
+    background: rgba(13,13,15,0.8);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-logo { font-weight: 700; font-size: 1.1rem; letter-spacing: -0.02em; }
+  .nav-logo span { color: var(--accent); }
+  .nav-links { display: flex; gap: 32px; }
+  .nav-links a {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: color var(--transition);
+  }
+  .nav-links a:hover { color: var(--text-primary); }
+
+  /* ─── 分隔線 ─── */
+  .divider { height: 1px; background: var(--border); margin: 0 48px; }
+
+  /* ─── 標籤 ─── */
+  .tag {
+    display: inline-block;
+    padding: 4px 12px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 100px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-right: 8px;
+    margin-bottom: 8px;
+  }
+  .tag.green { background: rgba(52,211,153,0.15); color: var(--accent-2); }
+
+  /* ─── 響應式 ─── */
+  @media (max-width: 768px) {
+    nav { padding: 16px 24px; }
+    .nav-links { display: none; }
+    section { padding: 80px 24px; }
+    .hero { padding: 100px 24px 60px; }
+    .hero-content { grid-template-columns: 1fr; gap: 40px; }
+    .hero-visual { display: none; }
+    .features-grid { grid-template-columns: 1fr; }
+    .feature-card.large { grid-row: span 1; }
+    .scrollytelling-inner { grid-template-columns: 1fr; }
+    .scrollytelling-steps { position: static; }
+    .divider { margin: 0 24px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- 頁面轉場覆蓋層 -->
+<div class="page-transition" id="page-transition"></div>
+
+<!-- Toast 容器 -->
+<div id="toast-container"></div>
+
+<!-- Onboarding Modal -->
+<div id="onboarding">
+  <div class="onboarding-card">
+    <div class="onboarding-progress">
+      <div class="progress-dot active" id="dot-1"></div>
+      <div class="progress-dot" id="dot-2"></div>
+      <div class="progress-dot" id="dot-3"></div>
+    </div>
+
+    <div class="onboarding-step active" id="step-1">
+      <div class="onboarding-emoji">🎨</div>
+      <div class="onboarding-title">歡迎來到 Vibe Coding</div>
+      <div class="onboarding-desc">這是一份完整的高質感 Web 設計規範示範頁面。你將看到 Magazine Layout、Parallax、Micro-interactions 等國際級設計技術的實際應用。</div>
+      <div class="onboarding-actions">
+        <button class="onboarding-skip" onclick="closeOnboarding()">跳過引導</button>
+        <button class="btn btn-primary" onclick="nextStep(2)">下一步 →</button>
+      </div>
+    </div>
+
+    <div class="onboarding-step" id="step-2">
+      <div class="onboarding-emoji">✨</div>
+      <div class="onboarding-title">滾動探索動效</div>
+      <div class="onboarding-desc">向下滾動頁面，觀察 Reveal on Scroll 動畫、Parallax 視差效果和 Scrollytelling 滾動敘事的實際效果。</div>
+      <div class="onboarding-actions">
+        <button class="onboarding-skip" onclick="prevStep(1)">← 上一步</button>
+        <button class="btn btn-primary" onclick="nextStep(3)">下一步 →</button>
+      </div>
+    </div>
+
+    <div class="onboarding-step" id="step-3">
+      <div class="onboarding-emoji">🚀</div>
+      <div class="onboarding-title">互動與回饋系統</div>
+      <div class="onboarding-desc">點擊頁面中的按鈕，體驗 Micro-interactions 微交互和 Toast Notification 通知系統。每個元素都有精心設計的回饋機制。</div>
+      <div class="onboarding-actions">
+        <button class="onboarding-skip" onclick="prevStep(2)">← 上一步</button>
+        <button class="btn btn-primary" onclick="closeOnboarding()">開始探索 🎉</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 導航 -->
+<nav id="main-nav">
+  <div class="nav-logo">Vibe<span>.</span>Coding</div>
+  <div class="nav-links">
+    <a href="#features">設計系統</a>
+    <a href="#scrollytelling">動效敘事</a>
+    <a href="#timeline">時間軸</a>
+    <a href="#interactions">交互回饋</a>
+  </div>
+</nav>
+
+<!-- Hero 區塊 (Parallax) -->
+<div class="hero" id="hero">
+  <div class="hero-bg" id="hero-bg"></div>
+  <div class="hero-content">
+    <div>
+      <div class="hero-label">Vibe Coding Spec v1.0</div>
+      <h1 class="hero-title">
+        高質感<br>
+        <span>Web 設計</span><br>
+        規範示範
+      </h1>
+      <p class="hero-desc">
+        Magazine Layout · Parallax · Scrollytelling · Micro-interactions · Toast · Skeleton Screen · Onboarding
+      </p>
+      <button class="hero-cta" onclick="showToast('✅ 已複製設計規範到剪貼板！')">
+        複製設計規範
+      </button>
+    </div>
+    <div class="hero-visual">
+      <!-- Skeleton Screen 示範 -->
+      <div class="skeleton-card">
+        <div class="skeleton skeleton-avatar"></div>
+        <div class="skeleton skeleton-line medium"></div>
+        <div class="skeleton skeleton-line full"></div>
+        <div class="skeleton skeleton-line short"></div>
+      </div>
+      <div class="skeleton-card">
+        <div class="skeleton skeleton-line medium"></div>
+        <div class="skeleton skeleton-line full"></div>
+        <div class="skeleton skeleton-line short"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- Magazine Layout — 特性區塊 -->
+<section id="features">
+  <div style="max-width:1200px; margin:0 auto;">
+    <div class="reveal">
+      <div class="section-label">設計系統</div>
+      <h2 class="section-title">Magazine Layout 雜誌式排版</h2>
+      <p class="section-desc">避免平均分布，強調視覺層級與留白，採用 Z / F 視線動線設計資訊優先順序。</p>
+    </div>
+
+    <div class="features-grid">
+      <!-- 大卡片 (Magazine 不對稱) -->
+      <div class="feature-card large reveal reveal-delay-1" onclick="showToast('🎨 Magazine Layout — 雜誌式排版')">
+        <div class="feature-icon">📐</div>
+        <div class="feature-title">Magazine Layout</div>
+        <div class="feature-desc">
+          這張卡片佔據了兩行的高度，與旁邊的小卡片形成不對稱的視覺張力。這正是雜誌式排版的核心：通過尺寸對比創造視覺節奏，引導用戶的視線從最重要的元素開始流動。
+          <br><br>
+          留白不是浪費空間，而是讓重要內容「呼吸」的必要設計語言。
+        </div>
+        <div style="margin-top: 24px;">
+          <span class="tag">Z-Pattern</span>
+          <span class="tag">F-Pattern</span>
+          <span class="tag green">Visual Hierarchy</span>
+        </div>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-2" onclick="showToast('✨ Reveal on Scroll — 滾動入場動畫')">
+        <div class="feature-icon">🎬</div>
+        <div class="feature-title">Reveal on Scroll</div>
+        <div class="feature-desc">淡入 + 上浮 20px，ease-out 曲線，0.7s 時長。</div>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-3" onclick="showToast('🌊 Parallax — 視差滾動效果')">
+        <div class="feature-icon">🌊</div>
+        <div class="feature-title">Parallax</div>
+        <div class="feature-desc">背景速率為前景的 50%，創造深度感。</div>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-2" onclick="showToast('🔮 Glassmorphism — 毛玻璃質感')">
+        <div class="feature-icon">🔮</div>
+        <div class="feature-title">Glassmorphism</div>
+        <div class="feature-desc">backdrop-filter: blur(20px) 毛玻璃效果。</div>
+      </div>
+
+      <div class="feature-card reveal reveal-delay-3" onclick="showToast('🌾 Grain Texture — 顆粒紋理')">
+        <div class="feature-icon">🌾</div>
+        <div class="feature-title">Grain Texture</div>
+        <div class="feature-desc">細微顆粒紋理，消除塑膠感，增加視覺深度。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Scrollytelling 區塊 -->
+<section class="scrollytelling" id="scrollytelling" style="padding: 120px 48px;">
+  <div class="scrollytelling-inner" style="max-width:1200px; margin:0 auto;">
+    <div class="scrollytelling-steps">
+      <div class="reveal">
+        <div class="section-label">動效敘事</div>
+        <h2 class="section-title">Scrollytelling</h2>
+        <p class="section-desc">隨著滾動，故事逐步展開。</p>
+      </div>
+      <div class="step active" id="step-indicator-1">
+        <div class="step-number">01 / 04</div>
+        <div class="step-title">布局與結構</div>
+        <div class="step-desc">Magazine Layout、Z-Pattern 視線動線、視覺層級。</div>
+      </div>
+      <div class="step" id="step-indicator-2">
+        <div class="step-number">02 / 04</div>
+        <div class="step-title">動效與敘事</div>
+        <div class="step-desc">Reveal on Scroll、Parallax、Scrollytelling。</div>
+      </div>
+      <div class="step" id="step-indicator-3">
+        <div class="step-number">03 / 04</div>
+        <div class="step-title">質感與視覺</div>
+        <div class="step-desc">Grain Texture、Glassmorphism、Soft Shadow。</div>
+      </div>
+      <div class="step" id="step-indicator-4">
+        <div class="step-number">04 / 04</div>
+        <div class="step-title">交互與回饋</div>
+        <div class="step-desc">Micro-interactions、Toast、Empty State。</div>
+      </div>
+    </div>
+
+    <div class="scrollytelling-content">
+      <div class="scroll-panel" data-step="1">
+        <div class="scroll-visual" style="background: linear-gradient(135deg, rgba(124,108,247,0.1), transparent); font-size: 4rem;">📐</div>
+      </div>
+      <div class="scroll-panel" data-step="2">
+        <div class="scroll-visual" style="background: linear-gradient(135deg, rgba(52,211,153,0.1), transparent); font-size: 4rem;">🎬</div>
+      </div>
+      <div class="scroll-panel" data-step="3">
+        <div class="scroll-visual" style="background: linear-gradient(135deg, rgba(251,191,36,0.1), transparent); font-size: 4rem;">🌾</div>
+      </div>
+      <div class="scroll-panel" data-step="4">
+        <div class="scroll-visual" style="background: linear-gradient(135deg, rgba(239,68,68,0.1), transparent); font-size: 4rem;">✨</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Timeline Layout -->
+<section id="timeline">
+  <div style="max-width:1200px; margin:0 auto; display:grid; grid-template-columns:1fr 1fr; gap:80px; align-items:start;">
+    <div>
+      <div class="reveal">
+        <div class="section-label">時間軸</div>
+        <h2 class="section-title">Timeline Layout</h2>
+        <p class="section-desc">適合歷程型內容，採用縱向時間軸進行敘事，增強故事感。</p>
+      </div>
+      <div class="timeline reveal reveal-delay-1">
+        <div class="timeline-item">
+          <div class="timeline-date">2024 Q1</div>
+          <div class="timeline-title">Canvas 2D 原型</div>
+          <div class="timeline-desc">初始版本，500-1.5K 粒子，15-30 FPS。</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-date">2024 Q3</div>
+          <div class="timeline-title">WebGL v2.0 升級</div>
+          <div class="timeline-desc">GPU 加速，10K-50K 粒子，45-60 FPS。</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-date">2025 Q1</div>
+          <div class="timeline-title">Three.js v3.0 重構</div>
+          <div class="timeline-desc">50K-120K 粒子，60+ FPS，零殘影。</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-date">2026 Q1</div>
+          <div class="timeline-title">WebGPU 終極版</div>
+          <div class="timeline-desc">百萬級粒子，Compute Shader，國際頂級。</div>
+        </div>
+      </div>
+    </div>
+    <div class="reveal reveal-delay-2">
+      <div class="glass-card">
+        <div class="section-label">Glassmorphism 示範</div>
+        <div style="font-size: 1.1rem; font-weight: 600; margin-bottom: 12px;">毛玻璃質感卡片</div>
+        <div style="color: var(--text-secondary); font-size: 0.875rem; line-height: 1.7; margin-bottom: 24px;">
+          這張卡片使用了 <code style="background: var(--accent-soft); color: var(--accent); padding: 2px 6px; border-radius: 4px;">backdrop-filter: blur(20px)</code> 創造毛玻璃效果，搭配半透明背景和細微邊框，呈現高級的視覺質感。
+        </div>
+        <div style="display: flex; gap: 12px;">
+          <span class="tag">Glassmorphism</span>
+          <span class="tag green">Soft Shadow</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Micro-interactions + Toast + Empty State -->
+<section id="interactions">
+  <div style="max-width:1200px; margin:0 auto;">
+    <div class="reveal">
+      <div class="section-label">交互與回饋</div>
+      <h2 class="section-title">Micro-interactions & Feedback</h2>
+      <p class="section-desc">每個可點擊元素都有精心設計的微交互，每次操作都有明確的回饋機制。</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 40px;">
+      <div class="reveal reveal-delay-1">
+        <h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 8px; color: var(--text-secondary);">Micro-interactions 按鈕</h3>
+        <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 20px;">Hover 放大 1.03-1.05x，Active 縮小 0.97x，150-250ms ease-out</p>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="showToast('✅ 主要操作成功！')">主要按鈕</button>
+          <button class="btn btn-secondary" onclick="showToast('ℹ️ 次要操作已執行')">次要按鈕</button>
+          <button class="btn btn-ghost" onclick="showToast('👻 Ghost 按鈕點擊')">Ghost 按鈕</button>
+        </div>
+      </div>
+
+      <div class="reveal reveal-delay-2">
+        <h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 8px; color: var(--text-secondary);">Toast Notification</h3>
+        <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 20px;">黑底白字、圓角、從底部滑入，3 秒後自動消失</p>
+        <div class="btn-group">
+          <button class="btn btn-primary" onclick="showToast('✅ 操作成功完成！')">成功通知</button>
+          <button class="btn btn-secondary" onclick="showToast('⚠️ 請注意此操作！')">警告通知</button>
+          <button class="btn btn-ghost" onclick="showToast('❌ 操作失敗，請重試')">錯誤通知</button>
+        </div>
+      </div>
+
+      <div class="reveal reveal-delay-3" style="grid-column: span 2;">
+        <h3 style="font-size: 1rem; font-weight: 600; margin-bottom: 8px; color: var(--text-secondary);">Empty State 空狀態設計</h3>
+        <p style="font-size: 0.875rem; color: var(--text-muted); margin-bottom: 20px;">插圖 + 友好文案 + 明確 CTA，避免空白頁面讓用戶迷失</p>
+        <div class="empty-state">
+          <span class="empty-state-emoji">🔍</span>
+          <div class="empty-state-title">找不到任何結果</div>
+          <div class="empty-state-desc">試試換個關鍵詞，或者清除篩選條件重新搜索。</div>
+          <button class="btn btn-primary" onclick="showToast('🔄 已清除篩選條件')">清除篩選</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Footer -->
+<footer style="padding: 60px 48px; text-align: center;">
+  <div style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 16px;">
+    Vibe Coding Spec v1.0 — 2026-03-03 — Manus AI
+  </div>
+  <div>
+    <span class="tag">Magazine Layout</span>
+    <span class="tag">Parallax</span>
+    <span class="tag">Scrollytelling</span>
+    <span class="tag green">Micro-interactions</span>
+    <span class="tag green">Toast</span>
+    <span class="tag green">Skeleton Screen</span>
+  </div>
+</footer>
+
+<script>
+// ─── Onboarding Flow ───
+let currentStep = 1;
+function nextStep(n) {
+  document.getElementById(`step-${currentStep}`).classList.remove('active');
+  document.getElementById(`dot-${currentStep}`).classList.remove('active');
+  document.getElementById(`dot-${currentStep}`).classList.add('done');
+  currentStep = n;
+  document.getElementById(`step-${currentStep}`).classList.add('active');
+  document.getElementById(`dot-${currentStep}`).classList.add('active');
+}
+function prevStep(n) {
+  document.getElementById(`step-${currentStep}`).classList.remove('active');
+  document.getElementById(`dot-${currentStep}`).classList.remove('active');
+  document.getElementById(`dot-${currentStep}`).classList.remove('done');
+  currentStep = n;
+  document.getElementById(`step-${currentStep}`).classList.add('active');
+  document.getElementById(`dot-${currentStep}`).classList.add('active');
+}
+function closeOnboarding() {
+  const el = document.getElementById('onboarding');
+  el.style.opacity = '0';
+  el.style.transition = 'opacity 0.3s ease';
+  setTimeout(() => el.classList.add('hidden'), 300);
+  showToast('🎉 歡迎！開始探索 Vibe Coding 設計規範');
+}
+
+// ─── Toast Notification ───
+function showToast(message) {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.innerHTML = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add('toast-out');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+// ─── Reveal on Scroll ───
+const revealObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      entry.target.classList.add('visible');
+    }
+  });
+}, { threshold: 0.1, rootMargin: '0px 0px -50px 0px' });
+document.querySelectorAll('.reveal').forEach(el => revealObserver.observe(el));
+
+// ─── Parallax ───
+const heroBg = document.getElementById('hero-bg');
+window.addEventListener('scroll', () => {
+  const scrollY = window.scrollY;
+  if (heroBg) {
+    heroBg.style.transform = `translateY(${scrollY * 0.4}px)`;
+  }
+  // Nav 滾動效果
+  const nav = document.getElementById('main-nav');
+  if (scrollY > 50) nav.classList.add('scrolled');
+  else nav.classList.remove('scrolled');
+});
+
+// ─── Scrollytelling ───
+const scrollPanels = document.querySelectorAll('.scroll-panel');
+const stepIndicators = document.querySelectorAll('[id^="step-indicator-"]');
+const scrollyObserver = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const stepNum = entry.target.dataset.step;
+      stepIndicators.forEach(s => s.classList.remove('active'));
+      const indicator = document.getElementById(`step-indicator-${stepNum}`);
+      if (indicator) indicator.classList.add('active');
+    }
+  });
+}, { threshold: 0.5 });
+scrollPanels.forEach(panel => scrollyObserver.observe(panel));
+
+// ─── Seamless Page Transition ───
+document.querySelectorAll('a[href^="#"]').forEach(link => {
+  link.addEventListener('click', (e) => {
+    const transition = document.getElementById('page-transition');
+    transition.classList.add('active');
+    setTimeout(() => transition.classList.remove('active'), 300);
+  });
+});
+</script>
+</body>
+</html>
