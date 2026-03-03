@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<!--
+╔══════════════════════════════════════════════════════════════════╗
+║  X2 QUANTUM TUNNEL — 量子隧道 (Quantum Tunnel Effect)            ║
+║  Version: 2.0.0 | Date: 2026-03-03                              ║
+║  INNOVATION: Radial Wave Propagation + Probability Clouds        ║
+╠══════════════════════════════════════════════════════════════════╣
+║  AI TECHNICAL SPECIFICATION                                      ║
+║  ■ 核心視覺：字符沿著同心圓波前螺旋運動，形成隧道效果             ║
+║  ■ 創新點：                                                      ║
+║    - **徑向波前**：中心發出同心圓波，字符沿著波前螺旋             ║
+║    - **概率雲**：字符在波前附近時出現機率增加（量子效應）         ║
+║    - **滑鼠干擾**：滑鼠成為新的波源，產生干涉圖案                 ║
+║    - **色彩映射**：根據波前位置映射顏色（波前=白, 遠處=暗）      ║
+║  ■ 色彩：極深紫底 + 波前白色→紫色→黑色漸變                       ║
+║  ■ 特效：干涉條紋 + 隧道深度感 + 量子不確定性視覺化              ║
+║  ■ 效能：預計算波前 + 極座標映射 + 批次繪製                       ║
+╚══════════════════════════════════════════════════════════════════╝
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>X2 QUANTUM TUNNEL — 量子隧道 v2.0</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a0033; overflow: hidden; cursor: crosshair; }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  .vignette {
+    position: fixed; inset: 0; z-index: 5; pointer-events: none;
+    background: radial-gradient(circle at center, transparent 20%, rgba(26,0,51,0.8) 100%);
+  }
+  .label {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.4em; color: rgba(168,85,247,0.35);
+  }
+  .fps { position: fixed; top: 12px; right: 16px; z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: rgba(168,85,247,0.4); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="vignette"></div>
+<div class="label">X2 QUANTUM TUNNEL // 量子隧道 v2.0 · Radial Wave Interference</div>
+<div class="fps" id="fps"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const CHARS = '01SICT語意永生記憶∑∂∇⊕⊗≡◈◇●○◉★☆∞∫∮∯αβγδεζηθλμνξπρστφχψω'.split('');
+  const COUNT = 1400;
+  const TUNNEL_DEPTH = 400;
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  let W, H;
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const texCache = new Map();
+  function getCharTex(char, size, fillColor, glowColor, glowSize) {
+    const key = `${char}|${size}|${fillColor}|${glowSize}`;
+    if (texCache.has(key)) return texCache.get(key);
+    const pad = Math.max(glowSize * 2, 2) + 4;
+    const tw = size + pad * 2;
+    const oc = document.createElement('canvas');
+    const octx = oc.getContext('2d');
+    oc.width = tw * dpr; oc.height = tw * dpr;
+    octx.scale(dpr, dpr);
+    octx.font = `bold ${size}px "JetBrains Mono", monospace`;
+    octx.textAlign = 'center'; octx.textBaseline = 'middle';
+    if (glowSize > 0) {
+      octx.shadowBlur = glowSize; octx.shadowColor = glowColor;
+      octx.fillStyle = glowColor;
+      octx.fillText(char, tw / 2, tw / 2);
+      octx.fillText(char, tw / 2, tw / 2);
+    }
+    octx.shadowBlur = 0; octx.fillStyle = fillColor;
+    octx.fillText(char, tw / 2, tw / 2);
+    const result = { canvas: oc, w: tw };
+    texCache.set(key, result);
+    return result;
+  }
+
+  const particles = new Array(COUNT);
+  for (let i = 0; i < COUNT; i++) {
+    particles[i] = {
+      angle: Math.random() * Math.PI * 2,
+      radius: Math.random() * TUNNEL_DEPTH,
+      spiralPhase: Math.random() * Math.PI * 2,
+      char: CHARS[Math.floor(Math.random() * CHARS.length)],
+      charTimer: 0, charInterval: Math.floor(Math.random() * 50 + 25),
+      size: 8 + Math.random() * 8,
+      alpha: Math.random() * 0.3 + 0.15,
+    };
+  }
+
+  let mx = W / 2, my = H / 2, lastMove = 0, isIdle = true;
+  window.addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; lastMove = performance.now(); isIdle = false; });
+  window.addEventListener('mouseleave', () => { isIdle = true; });
+
+  let frameCount = 0, lastFpsTime = performance.now();
+  const fpsEl = document.getElementById('fps');
+
+  function draw(now) {
+    requestAnimationFrame(draw);
+
+    frameCount++;
+    if (now - lastFpsTime >= 1000) {
+      fpsEl.textContent = frameCount + ' FPS'; frameCount = 0; lastFpsTime = now;
+    }
+
+    if (!isIdle && now - lastMove > 2000) isIdle = true;
+
+    ctx.fillStyle = 'rgba(26, 0, 51, 0.18)';
+    ctx.fillRect(0, 0, W, H);
+
+    const centerX = W / 2, centerY = H / 2;
+    const time = now * 0.0005;
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+
+      if (++p.charTimer >= p.charInterval) {
+        p.char = CHARS[Math.floor(Math.random() * CHARS.length)];
+        p.charTimer = 0;
+      }
+
+      // ── Radial Wave Propagation ────────────────────
+      // Particles spiral outward along wave fronts
+      const wavePhase = time - p.radius / TUNNEL_DEPTH * Math.PI * 2;
+      const spiralAmount = Math.sin(wavePhase) * 0.3; // Spiral amplitude
+      const adjustedAngle = p.angle + spiralAmount + p.spiralPhase * 0.01;
+
+      // Radial position oscillates with wave
+      let r = p.radius + Math.sin(wavePhase) * 30;
+      r = Math.max(0, Math.min(r, TUNNEL_DEPTH));
+
+      // ── Interference Pattern ───────────────────────
+      // Mouse creates secondary wave source
+      const dx = mx - centerX, dy = my - centerY;
+      const mouseDist = Math.sqrt(dx * dx + dy * dy);
+      const mouseAngle = Math.atan2(dy, dx);
+      const angleToMouse = Math.abs(adjustedAngle - mouseAngle);
+      const interference = Math.sin(angleToMouse * 3) * 0.5 + 0.5; // 0-1
+
+      // Particle position in Cartesian
+      const x = centerX + Math.cos(adjustedAngle) * r;
+      const y = centerY + Math.sin(adjustedAngle) * r;
+
+      // ── Probability Cloud ─────────────────────────
+      // Particles near wave front have higher opacity
+      const waveFrontDist = Math.abs(Math.sin(wavePhase));
+      const probabilityAlpha = waveFrontDist * 0.6 + 0.2;
+
+      // ── Color based on depth and interference ────
+      const depthFrac = r / TUNNEL_DEPTH;
+      let fillColor, glowColor = '', glowSize = 0;
+
+      if (waveFrontDist > 0.7) {
+        // Near wave front: bright white-purple
+        fillColor = `hsl(270, ${70 + interference * 30}%, ${80 + waveFrontDist * 20}%)`;
+        glowColor = 'rgba(168,85,247,0.6)'; glowSize = 8;
+      } else if (depthFrac > 0.7) {
+        // Far from center: dark purple
+        fillColor = `hsl(270, 40%, ${30 - depthFrac * 20}%)`;
+      } else {
+        // Mid-range: purple gradient
+        fillColor = `hsl(270, ${50 + (1 - depthFrac) * 30}%, ${50 - depthFrac * 30}%)`;
+      }
+
+      const sz = Math.round(p.size);
+      const tex = getCharTex(p.char, sz, fillColor, glowColor, glowSize);
+      ctx.globalAlpha = p.alpha * probabilityAlpha * (0.5 + interference * 0.5);
+      ctx.drawImage(tex.canvas, 0, 0, tex.canvas.width, tex.canvas.height,
+                    Math.round(x - tex.w / 2), Math.round(y - tex.w / 2), tex.w, tex.w);
+
+      // Update particle for next frame
+      p.radius += 1.5; // Spiral outward
+      if (p.radius > TUNNEL_DEPTH) {
+        p.radius = 0;
+        p.angle = Math.random() * Math.PI * 2;
+      }
+    }
+
+    ctx.globalAlpha = 1;
+
+    // ── Tunnel Rings Visualization ─────────────────
+    ctx.globalAlpha = 0.08;
+    ctx.strokeStyle = '#a855f7';
+    ctx.lineWidth = 1;
+    for (let r = 50; r < TUNNEL_DEPTH; r += 50) {
+      ctx.beginPath();
+      ctx.arc(Math.round(centerX), Math.round(centerY), r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Center glow
+    ctx.globalAlpha = 0.15;
+    const cg = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, 100);
+    cg.addColorStop(0, 'rgba(168,85,247,0.8)');
+    cg.addColorStop(1, 'rgba(168,85,247,0)');
+    ctx.fillStyle = cg;
+    ctx.beginPath(); ctx.arc(centerX, centerY, 100, 0, Math.PI * 2); ctx.fill();
+
+    ctx.globalAlpha = 1;
+  }
+
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

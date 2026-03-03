@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<!--
+╔══════════════════════════════════════════════════════════════════╗
+║  V1 STELLAR PRO — 星圖引力場 (Stellar Gravity Map)              ║
+║  Version: 2.0.0 | Date: 2026-03-03                              ║
+╠══════════════════════════════════════════════════════════════════╣
+║  AI TECHNICAL SPECIFICATION                                      ║
+║  ■ 核心視覺：深空星圖 + 引力透鏡效果                              ║
+║  ■ 互動邏輯：                                                    ║
+║    - 閒置：星辰緩慢漂移 + 閃爍(twinkle)                           ║
+║    - 滑鼠進入：星辰被引力拉入螺旋軌道                             ║
+║    - 滑鼠離開：星辰釋放回漂移狀態                                 ║
+║  ■ 色彩：極深太空藍(#010810) + 暖白到冷藍星光                     ║
+║  ■ 特效：引力透鏡光暈 + 軌道環 + 核心亮點                         ║
+║  ■ 效能升級：預渲染紋理 + HiDPI + 批次繪製                        ║
+╚══════════════════════════════════════════════════════════════════╝
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>V1 STELLAR PRO — 星圖引力場 v2.0</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #010810; overflow: hidden; cursor: crosshair; }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  .vignette {
+    position: fixed; inset: 0; z-index: 5; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 30%, rgba(1,8,16,0.55) 80%, rgba(1,8,16,0.85) 100%);
+  }
+  .scanlines {
+    position: fixed; inset: 0; z-index: 6; pointer-events: none; opacity: 0.2;
+    background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.15) 3px, rgba(0,0,0,0.15) 4px);
+  }
+  .label {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.4em; color: rgba(8,145,178,0.35);
+  }
+  .fps { position: fixed; top: 12px; right: 16px; z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: rgba(34,211,238,0.4); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="vignette"></div>
+<div class="scanlines"></div>
+<div class="label">V1 STELLAR PRO // 星圖引力場 v2.0</div>
+<div class="fps" id="fps"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const CHARS = 'SICT∑∂∇⊕⊗≡◈◇●○◉★☆∞∫∮∯01αβγδεζηθλμνξπρστφχψω'.split('');
+  const COUNT = 800;
+  const GRAVITY_R = 260;
+  const IDLE_MS = 2200;
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  let W, H;
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // ── Pre-render star textures ───────────────────────
+  const starTexCache = new Map();
+
+  function makeStarTex(char, size, fillColor, glowColor, glowSize) {
+    const key = `${char}|${size}|${fillColor}|${glowSize}`;
+    if (starTexCache.has(key)) return starTexCache.get(key);
+
+    const pad = Math.max(glowSize * 2, 4) + 4;
+    const oc = document.createElement('canvas');
+    const octx = oc.getContext('2d');
+    const totalW = size + pad * 2;
+    oc.width = totalW * dpr; oc.height = totalW * dpr;
+    octx.scale(dpr, dpr);
+    octx.font = `bold ${size}px "JetBrains Mono", monospace`;
+    octx.textAlign = 'center'; octx.textBaseline = 'middle';
+
+    if (glowSize > 0) {
+      octx.shadowBlur = glowSize;
+      octx.shadowColor = glowColor;
+      octx.fillStyle = glowColor;
+      octx.fillText(char, totalW / 2, totalW / 2);
+      octx.fillText(char, totalW / 2, totalW / 2);
+    }
+    octx.shadowBlur = 0;
+    octx.fillStyle = fillColor;
+    octx.fillText(char, totalW / 2, totalW / 2);
+
+    const result = { canvas: oc, w: totalW, pad };
+    starTexCache.set(key, result);
+    return result;
+  }
+
+  // ── Stars ──────────────────────────────────────────
+  const stars = new Array(COUNT);
+  for (let i = 0; i < COUNT; i++) {
+    stars[i] = {
+      hx: Math.random() * W, hy: Math.random() * H,
+      x: Math.random() * W, y: Math.random() * H,
+      dvx: (Math.random() - 0.5) * 0.18,
+      dvy: (Math.random() - 0.5) * 0.18,
+      orbitAngle: Math.random() * Math.PI * 2,
+      orbitR: 30 + Math.random() * 200,
+      orbitSpeed: (Math.random() * 0.022 + 0.008) * (Math.random() > 0.5 ? 1 : -1),
+      state: 0, // 0=drift, 1=pull, 2=orbit, 3=release
+      char: CHARS[Math.floor(Math.random() * CHARS.length)],
+      charTimer: 0,
+      charInterval: Math.floor(Math.random() * 30 + 15),
+      size: 10 + Math.random() * 6,
+      alpha: Math.random() * 0.35 + 0.15,
+      bright: Math.random(),
+      twinklePhase: Math.random() * Math.PI * 2,
+      twinkleSpeed: Math.random() * 0.03 + 0.01,
+      returnLerp: 0.015 + Math.random() * 0.025,
+    };
+  }
+
+  let mx = -9999, my = -9999, lastMove = 0, isIdle = true;
+  window.addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; lastMove = performance.now(); isIdle = false; });
+  window.addEventListener('mouseleave', () => { mx = -9999; my = -9999; isIdle = true; });
+
+  // Pre-render gravity lens glow
+  const lensCanvas = document.createElement('canvas');
+  const lensCtx = lensCanvas.getContext('2d');
+  const LENS_SIZE = GRAVITY_R * 2;
+  lensCanvas.width = LENS_SIZE * dpr; lensCanvas.height = LENS_SIZE * dpr;
+  lensCtx.scale(dpr, dpr);
+  const lg = lensCtx.createRadialGradient(GRAVITY_R, GRAVITY_R, 0, GRAVITY_R, GRAVITY_R, GRAVITY_R);
+  lg.addColorStop(0, 'rgba(6,182,212,0.3)');
+  lg.addColorStop(0.3, 'rgba(6,182,212,0.1)');
+  lg.addColorStop(1, 'rgba(6,182,212,0)');
+  lensCtx.fillStyle = lg;
+  lensCtx.fillRect(0, 0, LENS_SIZE, LENS_SIZE);
+
+  // Core glow
+  const coreCanvas = document.createElement('canvas');
+  const coreCtx = coreCanvas.getContext('2d');
+  coreCanvas.width = 40 * dpr; coreCanvas.height = 40 * dpr;
+  coreCtx.scale(dpr, dpr);
+  const cg = coreCtx.createRadialGradient(20, 20, 0, 20, 20, 20);
+  cg.addColorStop(0, 'rgba(186,230,253,0.9)');
+  cg.addColorStop(0.4, 'rgba(6,182,212,0.4)');
+  cg.addColorStop(1, 'rgba(6,182,212,0)');
+  coreCtx.fillStyle = cg;
+  coreCtx.fillRect(0, 0, 40, 40);
+
+  let frameCount = 0, lastFpsTime = performance.now();
+  const fpsEl = document.getElementById('fps');
+
+  function draw(now) {
+    requestAnimationFrame(draw);
+
+    frameCount++;
+    if (now - lastFpsTime >= 1000) {
+      fpsEl.textContent = frameCount + ' FPS';
+      frameCount = 0; lastFpsTime = now;
+    }
+
+    if (!isIdle && now - lastMove > IDLE_MS) isIdle = true;
+
+    ctx.fillStyle = 'rgba(1, 8, 16, 0.12)';
+    ctx.fillRect(0, 0, W, H);
+
+    for (let i = 0; i < stars.length; i++) {
+      const s = stars[i];
+
+      if (++s.charTimer >= s.charInterval) {
+        s.char = CHARS[Math.floor(Math.random() * CHARS.length)];
+        s.charTimer = 0;
+      }
+
+      s.twinklePhase += s.twinkleSpeed;
+      const twinkle = 0.5 + 0.5 * Math.sin(s.twinklePhase);
+
+      const dx = s.x - mx, dy = s.y - my;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      // State transitions
+      if (!isIdle && dist < GRAVITY_R && s.state === 0) {
+        s.state = 1;
+        s.orbitAngle = Math.atan2(s.y - my, s.x - mx);
+      }
+      if (s.state === 1 && Math.abs(dist - s.orbitR) < 15) s.state = 2;
+      if (isIdle && (s.state === 1 || s.state === 2)) s.state = 3;
+
+      // Physics
+      if (s.state === 0) {
+        s.hx += s.dvx; s.hy += s.dvy;
+        if (s.hx < -20) s.hx = W + 20; if (s.hx > W + 20) s.hx = -20;
+        if (s.hy < -20) s.hy = H + 20; if (s.hy > H + 20) s.hy = -20;
+        s.x += (s.hx - s.x) * 0.08;
+        s.y += (s.hy - s.y) * 0.08;
+      } else if (s.state === 1) {
+        const tX = mx + (dx / dist) * s.orbitR;
+        const tY = my + (dy / dist) * s.orbitR;
+        s.x += (tX - s.x) * 0.06;
+        s.y += (tY - s.y) * 0.06;
+      } else if (s.state === 2) {
+        s.orbitAngle += s.orbitSpeed;
+        s.x += (mx + Math.cos(s.orbitAngle) * s.orbitR - s.x) * 0.1;
+        s.y += (my + Math.sin(s.orbitAngle) * s.orbitR - s.y) * 0.1;
+        if (isIdle) s.state = 3;
+      } else if (s.state === 3) {
+        s.x += (s.hx - s.x) * s.returnLerp;
+        s.y += (s.hy - s.y) * s.returnLerp;
+        if (Math.sqrt((s.x - s.hx) ** 2 + (s.y - s.hy) ** 2) < 3) s.state = 0;
+      }
+
+      // Render
+      const orbiting = s.state === 2 || s.state === 1;
+      const t = 1 - Math.min(dist, GRAVITY_R) / GRAVITY_R;
+      const alpha = orbiting ? (0.6 + t * 0.4) : (s.alpha * (0.6 + twinkle * 0.4));
+
+      let fillColor, glowColor, glowSize;
+      if (orbiting) {
+        if (s.bright > 0.8) { fillColor = '#ffffff'; glowColor = '#38bdf8'; glowSize = 18; }
+        else if (s.bright > 0.5) { fillColor = '#7dd3fc'; glowColor = '#0ea5e9'; glowSize = 8; }
+        else { fillColor = '#a5f3fc'; glowColor = '#06b6d4'; glowSize = 5; }
+      } else {
+        const h = 195 + twinkle * 30;
+        const sat = 60 + twinkle * 40;
+        const l = 50 + twinkle * 35;
+        fillColor = `hsl(${h},${sat}%,${l}%)`;
+        glowColor = '#38bdf8';
+        glowSize = twinkle > 0.9 ? 12 : 0;
+      }
+
+      const tex = makeStarTex(s.char, Math.round(s.size), fillColor, glowColor, glowSize);
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(tex.canvas, 0, 0, tex.canvas.width, tex.canvas.height,
+                    Math.round(s.x - tex.w / 2), Math.round(s.y - tex.w / 2), tex.w, tex.w);
+    }
+
+    ctx.globalAlpha = 1;
+
+    // Gravity lens
+    if (!isIdle && mx > 0) {
+      const age = (now - lastMove) / 1000;
+      const fade = Math.max(0, 1 - age * 1.1);
+      if (fade > 0.01) {
+        ctx.globalAlpha = fade * 0.15;
+        ctx.drawImage(lensCanvas, 0, 0, lensCanvas.width, lensCanvas.height,
+                      mx - GRAVITY_R, my - GRAVITY_R, LENS_SIZE, LENS_SIZE);
+
+        ctx.globalAlpha = fade * 0.5;
+        ctx.drawImage(coreCanvas, 0, 0, coreCanvas.width, coreCanvas.height,
+                      mx - 20, my - 20, 40, 40);
+
+        // Orbit rings
+        ctx.globalAlpha = fade * 0.08;
+        ctx.strokeStyle = '#22d3ee';
+        ctx.lineWidth = 0.5;
+        [80, 140, 200].forEach(r => {
+          ctx.beginPath();
+          ctx.arc(Math.round(mx), Math.round(my), r, 0, Math.PI * 2);
+          ctx.stroke();
+        });
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

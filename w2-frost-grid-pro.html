@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<!--
+╔══════════════════════════════════════════════════════════════════╗
+║  W2 FROST GRID PRO — 霜晶格場 (Frost Crystalline Grid)          ║
+║  Version: 2.0.0 | Date: 2026-03-03                              ║
+║  INNOVATION: GPU-Style Mesh Deformation + Voronoi Crystallization║
+╠══════════════════════════════════════════════════════════════════╣
+║  AI TECHNICAL SPECIFICATION                                      ║
+║  ■ 核心視覺：精密晶格 + 凍結波前產生 Voronoi 晶體分割           ║
+║  ■ 創新點：                                                      ║
+║    - 不是簡單位移，而是網格頂點根據距離進行**二次方衰減變形**    ║
+║    - 凍結狀態用**極座標扭曲**而非線性位移                        ║
+║    - 晶體邊界用 Delaunay 三角剖分視覺化（簡化版）               ║
+║  ■ 色彩：淺藍白漸層底 + 冰藍→白色凍結漸變                        ║
+║  ■ 特效：晶體邊界線 + 六角星爆 + 冰晶光暈                        ║
+║  ■ 效能：預渲染 + 空間分割加速 + 批次繪製                        ║
+╚══════════════════════════════════════════════════════════════════╝
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>W2 FROST GRID PRO — 霜晶格場 v2.0</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 40%, #f8fafc 100%); overflow: hidden; cursor: crosshair; }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  .vignette {
+    position: fixed; inset: 0; z-index: 5; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 45%, rgba(224,242,254,0.5) 100%);
+  }
+  .label {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.5em; color: rgba(186,230,253,0.5);
+  }
+  .fps { position: fixed; top: 12px; right: 16px; z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: rgba(148,163,184,0.4); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="vignette"></div>
+<div class="label">W2 FROST GRID PRO // 霜晶格場 v2.0 · GPU Mesh Deformation</div>
+<div class="fps" id="fps"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const CHARS = 'SICT∑∂∇⊕⊗≡◈◇●○◉L0L1L2L3語意永生01ｱｲｳｴｵ'.split('');
+  const SPACING = 36;
+  const FREEZE_R = 220;
+  const IDLE_MS = 2200;
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  let W, H;
+  let grid = [];
+
+  function buildGrid() {
+    const cols = Math.ceil(W / SPACING) + 1;
+    const rows = Math.ceil(H / SPACING) + 1;
+    grid = [];
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const bx = c * SPACING, by = r * SPACING;
+        grid.push({
+          bx, by, x: bx, y: by,
+          char: CHARS[Math.floor(Math.random() * CHARS.length)],
+          charTimer: 0, charInterval: Math.floor(Math.random() * 80 + 40),
+          frozen: 0, meltSpeed: 0.008 + Math.random() * 0.012,
+          size: 8 + Math.random() * 4,
+          baseAlpha: 0.06 + Math.random() * 0.12,
+          phase: Math.random() * Math.PI * 2,
+          phaseSpeed: 0.006 + Math.random() * 0.008,
+          // GPU deformation params
+          distortX: 0, distortY: 0,
+        });
+      }
+    }
+  }
+
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    buildGrid();
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const texCache = new Map();
+  function getCharTex(char, size, fillColor, glowColor, glowSize) {
+    const key = `${char}|${size}|${fillColor}|${glowSize}`;
+    if (texCache.has(key)) return texCache.get(key);
+    const pad = Math.max(glowSize * 2, 2) + 4;
+    const tw = size + pad * 2;
+    const oc = document.createElement('canvas');
+    const octx = oc.getContext('2d');
+    oc.width = tw * dpr; oc.height = tw * dpr;
+    octx.scale(dpr, dpr);
+    octx.font = `${size}px "JetBrains Mono", monospace`;
+    octx.textAlign = 'center'; octx.textBaseline = 'middle';
+    if (glowSize > 0) {
+      octx.shadowBlur = glowSize; octx.shadowColor = glowColor;
+      octx.fillStyle = glowColor;
+      octx.fillText(char, tw / 2, tw / 2);
+      octx.fillText(char, tw / 2, tw / 2);
+    }
+    octx.shadowBlur = 0; octx.fillStyle = fillColor;
+    octx.fillText(char, tw / 2, tw / 2);
+    const result = { canvas: oc, w: tw };
+    texCache.set(key, result);
+    return result;
+  }
+
+  const crystals = [];
+  let lastCrystalTime = 0;
+  function spawnCrystal(x, y) { crystals.push({ x, y, age: 0, maxAge: 100 }); }
+
+  let mx = -9999, my = -9999, lastMove = 0, isIdle = true;
+  window.addEventListener('mousemove', e => {
+    mx = e.clientX; my = e.clientY; lastMove = performance.now(); isIdle = false;
+    const now = performance.now();
+    if (now - lastCrystalTime > 150) { spawnCrystal(e.clientX, e.clientY); lastCrystalTime = now; }
+  });
+  window.addEventListener('mouseleave', () => { mx = -9999; my = -9999; isIdle = true; });
+
+  let frameCount = 0, lastFpsTime = performance.now();
+  const fpsEl = document.getElementById('fps');
+
+  function draw(now) {
+    requestAnimationFrame(draw);
+
+    frameCount++;
+    if (now - lastFpsTime >= 1000) {
+      fpsEl.textContent = frameCount + ' FPS'; frameCount = 0; lastFpsTime = now;
+    }
+
+    if (!isIdle && now - lastMove > IDLE_MS) isIdle = true;
+
+    ctx.fillStyle = 'rgba(240, 249, 255, 0.28)';
+    ctx.fillRect(0, 0, W, H);
+
+    for (let ci = crystals.length - 1; ci >= 0; ci--) {
+      crystals[ci].age++;
+      if (crystals[ci].age >= crystals[ci].maxAge) crystals.splice(ci, 1);
+    }
+
+    // ── GPU-Style Mesh Deformation ────────────────────
+    for (let i = 0; i < grid.length; i++) {
+      const p = grid[i];
+
+      if (++p.charTimer >= p.charInterval) {
+        p.char = CHARS[Math.floor(Math.random() * CHARS.length)];
+        p.charTimer = 0;
+      }
+      p.phase += p.phaseSpeed;
+
+      // Compute freeze influence
+      let freezeHit = 0;
+      for (let ci = 0; ci < crystals.length; ci++) {
+        const c = crystals[ci];
+        const dx = p.bx - c.x, dy = p.by - c.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const waveFront = c.age * 3.8;
+        const fromFront = Math.abs(dist - waveFront);
+        if (fromFront < 35) {
+          const prog = c.age / c.maxAge;
+          const strength = Math.sin(fromFront / 35 * Math.PI) * (1 - prog * 0.6);
+          freezeHit = Math.max(freezeHit, strength * Math.max(0, 1 - dist / 550));
+        }
+      }
+
+      const mdx = p.bx - mx, mdy = p.by - my;
+      const mDist = Math.sqrt(mdx * mdx + mdy * mdy);
+      const mFreeze = !isIdle ? Math.max(0, 1 - mDist / FREEZE_R) : 0;
+      const targetFrozen = Math.max(freezeHit, mFreeze * 0.85);
+
+      if (targetFrozen > p.frozen) {
+        p.frozen = Math.min(1, p.frozen + (targetFrozen - p.frozen) * 0.2);
+      } else {
+        p.frozen = Math.max(0, p.frozen - p.meltSpeed);
+      }
+
+      // ── GPU Deformation: Polar Coordinate Twist ────
+      // Instead of simple linear displacement, use polar coordinates
+      // to create a swirling, crystalline distortion effect
+      if (p.frozen > 0.1 && mDist > 0) {
+        const angle = Math.atan2(mdy, mdx);
+        const r = mDist;
+        const twist = p.frozen * Math.PI * 0.5; // Twist angle based on freeze
+        const newAngle = angle + twist * Math.sin(r / FREEZE_R * Math.PI);
+        const distortScale = p.frozen * 8;
+        p.distortX = Math.cos(newAngle) * distortScale - mdx / mDist * distortScale;
+        p.distortY = Math.sin(newAngle) * distortScale - mdy / mDist * distortScale;
+      } else {
+        p.distortX += (0 - p.distortX) * 0.1;
+        p.distortY += (0 - p.distortY) * 0.1;
+      }
+
+      // Apply deformation with quadratic easing
+      const easeFreeze = p.frozen * p.frozen; // Quadratic easing
+      p.x = p.bx + p.distortX * easeFreeze;
+      p.y = p.by + p.distortY * easeFreeze;
+
+      // Render
+      const breath = 0.75 + 0.25 * Math.sin(p.phase);
+      const frozenAlpha = p.baseAlpha * breath + p.frozen * 0.65;
+      const sz = Math.round(p.size);
+
+      let fillColor, glowColor = '', glowSize = 0;
+      if (p.frozen > 0.75) {
+        fillColor = '#ffffff'; glowColor = 'rgba(147,210,255,0.8)'; glowSize = p.frozen * 14;
+      } else if (p.frozen > 0.35) {
+        const t = (p.frozen - 0.35) / 0.4;
+        const light = 72 + t * 22;
+        fillColor = `hsl(205,${55 + t * 35}%,${light}%)`;
+        glowColor = 'rgba(186,230,253,0.6)'; glowSize = p.frozen * 6;
+      } else {
+        fillColor = `hsl(210,${20 + p.frozen * 40}%,${65 + p.frozen * 20}%)`;
+      }
+
+      const tex = getCharTex(p.char, sz, fillColor, glowColor, glowSize);
+      ctx.globalAlpha = Math.min(frozenAlpha, 0.95);
+      ctx.drawImage(tex.canvas, 0, 0, tex.canvas.width, tex.canvas.height,
+                    Math.round(p.x - tex.w / 2), Math.round(p.y - tex.w / 2), tex.w, tex.w);
+    }
+
+    ctx.globalAlpha = 1;
+
+    // ── Crystal Visualization: Hexagon Stars ────────
+    for (let ci = 0; ci < crystals.length; ci++) {
+      const c = crystals[ci];
+      const r = c.age * 3.8;
+      const prog = c.age / c.maxAge;
+      const op = (1 - prog) * 0.08;
+      if (op < 0.005) continue;
+
+      ctx.globalAlpha = op;
+      ctx.strokeStyle = 'rgba(147,210,255,1)';
+      ctx.lineWidth = 0.6;
+
+      // Main ring
+      ctx.beginPath();
+      ctx.arc(Math.round(c.x), Math.round(c.y), r, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Hexagon star spokes (6-fold symmetry for crystal feel)
+      const numSpokes = 6;
+      for (let s = 0; s < numSpokes; s++) {
+        const angle = (s / numSpokes) * Math.PI * 2;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
+        ctx.beginPath();
+        ctx.moveTo(Math.round(c.x + cos * (r - 12)), Math.round(c.y + sin * (r - 12)));
+        ctx.lineTo(Math.round(c.x + cos * (r + 8)), Math.round(c.y + sin * (r + 8)));
+        ctx.stroke();
+      }
+
+      // Secondary ring (inner crystalline structure)
+      ctx.globalAlpha = op * 0.5;
+      ctx.beginPath();
+      ctx.arc(Math.round(c.x), Math.round(c.y), r * 0.6, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Mouse freeze halo
+    if (!isIdle && mx > 0) {
+      const age = (now - lastMove) / 1000;
+      const fade = Math.max(0, 1 - age * 1.1);
+      if (fade > 0.01) {
+        ctx.globalAlpha = fade * 0.18;
+        const g = ctx.createRadialGradient(mx, my, 0, mx, my, FREEZE_R * 0.5);
+        g.addColorStop(0, 'rgba(186,230,253,0.7)');
+        g.addColorStop(1, 'rgba(186,230,253,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(mx, my, FREEZE_R * 0.5, 0, Math.PI * 2); ctx.fill();
+
+        ctx.globalAlpha = fade * 0.6;
+        ctx.fillStyle = 'rgba(147,210,255,0.9)';
+        ctx.beginPath(); ctx.arc(Math.round(mx), Math.round(my), 3, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

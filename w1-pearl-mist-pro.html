@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<!--
+╔══════════════════════════════════════════════════════════════════╗
+║  W1 PEARL MIST PRO — 珍珠霧場 (Pearl Mist Field)                ║
+║  Version: 2.0.0 | Date: 2026-03-03                              ║
+╠══════════════════════════════════════════════════════════════════╣
+║  AI TECHNICAL SPECIFICATION                                      ║
+║  ■ 核心視覺：白底水墨暈染風格，字符如墨點漂浮                     ║
+║  ■ 互動邏輯：                                                    ║
+║    - 滑鼠移動：沿路徑生成墨滴波紋，字符向外暈散                   ║
+║    - 滑鼠靠近：字符被輕柔推開                                     ║
+║    - 閒置：字符緩慢漂移                                           ║
+║  ■ 色彩：珍珠白底(#f8fafc) + 鋼藍水墨色系                        ║
+║  ■ 特效：墨滴波紋環 + 柔和藍色光暈 + 紙張紋理                    ║
+║  ■ 效能升級：預渲染紋理 + HiDPI + 批次繪製                        ║
+╚══════════════════════════════════════════════════════════════════╝
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>W1 PEARL MIST PRO — 珍珠霧場 v2.0</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #f8fafc; overflow: hidden; cursor: crosshair; }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  .edge-fade {
+    position: fixed; inset: 0; z-index: 5; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 50%, rgba(241,245,249,0.6) 100%);
+  }
+  .paper-grain {
+    position: fixed; inset: 0; z-index: 6; pointer-events: none; opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+    background-size: 300px 300px;
+  }
+  .label {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.5em; color: rgba(203,213,225,0.6);
+  }
+  .fps { position: fixed; top: 12px; right: 16px; z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: rgba(148,163,184,0.4); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="edge-fade"></div>
+<div class="paper-grain"></div>
+<div class="label">W1 PEARL MIST PRO // 珍珠霧場 v2.0</div>
+<div class="fps" id="fps"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const CHARS = 'SICT語意永生記憶上傳∑∂∇⊕L0L1L2L3ｱｲｳｴｵｶｷｸ01'.split('');
+  const COUNT = 800;
+  const INK_R = 200;
+  const IDLE_MS = 2000;
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  let W, H;
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const texCache = new Map();
+  function getCharTex(char, size, fillColor, glowColor, glowSize) {
+    const key = `${char}|${size}|${fillColor}|${glowSize}`;
+    if (texCache.has(key)) return texCache.get(key);
+    const pad = Math.max(glowSize * 2, 2) + 4;
+    const tw = size + pad * 2;
+    const oc = document.createElement('canvas');
+    const octx = oc.getContext('2d');
+    oc.width = tw * dpr; oc.height = tw * dpr;
+    octx.scale(dpr, dpr);
+    octx.font = `${size}px "JetBrains Mono", Consolas, monospace`;
+    octx.textAlign = 'center'; octx.textBaseline = 'middle';
+    if (glowSize > 0) {
+      octx.shadowBlur = glowSize; octx.shadowColor = glowColor;
+      octx.fillStyle = glowColor;
+      octx.fillText(char, tw / 2, tw / 2);
+      octx.fillText(char, tw / 2, tw / 2);
+    }
+    octx.shadowBlur = 0; octx.fillStyle = fillColor;
+    octx.fillText(char, tw / 2, tw / 2);
+    const result = { canvas: oc, w: tw };
+    texCache.set(key, result);
+    return result;
+  }
+
+  const particles = new Array(COUNT);
+  for (let i = 0; i < COUNT; i++) {
+    particles[i] = {
+      hx: Math.random() * (W || 1200), hy: Math.random() * (H || 800),
+      x: Math.random() * (W || 1200), y: Math.random() * (H || 800),
+      dvx: (Math.random() - 0.5) * 0.12, dvy: (Math.random() - 0.5) * 0.12,
+      char: CHARS[Math.floor(Math.random() * CHARS.length)],
+      charTimer: 0, charInterval: Math.floor(Math.random() * 40 + 20),
+      size: 9 + Math.random() * 8,
+      hue: 200 + Math.random() * 30,
+      sat: 20 + Math.random() * 50,
+      light: 55 + Math.random() * 30,
+      baseAlpha: Math.random() * 0.18 + 0.06,
+      phase: Math.random() * Math.PI * 2,
+      phaseSpeed: Math.random() * 0.012 + 0.004,
+    };
+  }
+
+  const drops = [];
+  let lastDropTime = 0;
+  function spawnDrop(x, y) { drops.push({ x, y, age: 0, maxAge: 80 }); }
+
+  let mx = -9999, my = -9999, lastMove = 0, isIdle = true;
+  window.addEventListener('mousemove', e => {
+    mx = e.clientX; my = e.clientY; lastMove = performance.now(); isIdle = false;
+    const now = performance.now();
+    if (now - lastDropTime > 120) { spawnDrop(e.clientX, e.clientY); lastDropTime = now; }
+  });
+  window.addEventListener('mouseleave', () => { mx = -9999; my = -9999; isIdle = true; });
+
+  setTimeout(() => spawnDrop((W || 1200) * 0.4, (H || 800) * 0.5), 300);
+  setTimeout(() => spawnDrop((W || 1200) * 0.65, (H || 800) * 0.35), 900);
+
+  let frameCount = 0, lastFpsTime = performance.now();
+  const fpsEl = document.getElementById('fps');
+
+  function draw(now) {
+    requestAnimationFrame(draw);
+
+    frameCount++;
+    if (now - lastFpsTime >= 1000) {
+      fpsEl.textContent = frameCount + ' FPS'; frameCount = 0; lastFpsTime = now;
+    }
+
+    if (!isIdle && now - lastMove > IDLE_MS) isIdle = true;
+
+    ctx.fillStyle = 'rgba(248, 250, 252, 0.22)';
+    ctx.fillRect(0, 0, W, H);
+
+    for (let di = drops.length - 1; di >= 0; di--) {
+      drops[di].age++;
+      if (drops[di].age >= drops[di].maxAge) drops.splice(di, 1);
+    }
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+
+      if (++p.charTimer >= p.charInterval) {
+        p.char = CHARS[Math.floor(Math.random() * CHARS.length)];
+        p.charTimer = 0;
+      }
+      p.phase += p.phaseSpeed;
+
+      let totalPushX = 0, totalPushY = 0, maxInfl = 0;
+      for (let di = 0; di < drops.length; di++) {
+        const d = drops[di];
+        const dx = p.x - d.x, dy = p.y - d.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const waveFront = d.age * 4.5;
+        const fromFront = Math.abs(dist - waveFront);
+        if (fromFront < 45) {
+          const progress = d.age / d.maxAge;
+          const amp = Math.sin(fromFront / 45 * Math.PI) * (1 - progress) * 18;
+          const decay = Math.max(0, 1 - dist / 500);
+          if (dist > 0) { totalPushX += (dx / dist) * amp * decay; totalPushY += (dy / dist) * amp * decay; }
+          maxInfl = Math.max(maxInfl, (1 - progress) * decay);
+        }
+      }
+
+      const mdx = p.x - mx, mdy = p.y - my;
+      const mDist = Math.sqrt(mdx * mdx + mdy * mdy);
+      const mInfl = !isIdle ? Math.max(0, 1 - mDist / INK_R) : 0;
+      if (mInfl > 0) {
+        totalPushX += (mdx / (mDist || 1)) * mInfl * 10;
+        totalPushY += (mdy / (mDist || 1)) * mInfl * 10;
+      }
+
+      p.hx += p.dvx; p.hy += p.dvy;
+      if (p.hx < -10) p.hx = W + 10; if (p.hx > W + 10) p.hx = -10;
+      if (p.hy < -10) p.hy = H + 10; if (p.hy > H + 10) p.hy = -10;
+
+      p.x += (p.hx - p.x) * 0.03 + totalPushX * 0.4;
+      p.y += (p.hy - p.y) * 0.03 + totalPushY * 0.4;
+
+      const breath = 0.7 + 0.3 * Math.sin(p.phase);
+      const alpha = Math.min(p.baseAlpha * breath + maxInfl * 0.55 + mInfl * 0.25, 0.92);
+
+      let fillColor, glowColor = '', glowSize = 0;
+      if (maxInfl > 0.5) {
+        fillColor = 'hsl(210,70%,42%)'; glowColor = 'rgba(96,165,250,0.5)'; glowSize = 8;
+      } else if (mInfl > 0.4) {
+        fillColor = 'hsl(215,60%,50%)'; glowColor = 'rgba(147,197,253,0.4)'; glowSize = 4;
+      } else {
+        fillColor = `hsl(${p.hue},${p.sat * breath}%,${p.light + (1 - breath) * 10}%)`;
+      }
+
+      const sz = Math.round(p.size);
+      const tex = getCharTex(p.char, sz, fillColor, glowColor, glowSize);
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(tex.canvas, 0, 0, tex.canvas.width, tex.canvas.height,
+                    Math.round(p.x - tex.w / 2), Math.round(p.y - tex.w / 2), tex.w, tex.w);
+    }
+
+    ctx.globalAlpha = 1;
+
+    // Drop rings
+    for (let di = 0; di < drops.length; di++) {
+      const d = drops[di];
+      const r = d.age * 4.5;
+      const progress = d.age / d.maxAge;
+      const op = (1 - progress) * 0.1;
+      if (op < 0.005) continue;
+      ctx.globalAlpha = op;
+      ctx.strokeStyle = 'rgba(96,165,250,0.8)';
+      ctx.lineWidth = 0.8;
+      ctx.beginPath();
+      ctx.arc(Math.round(d.x), Math.round(d.y), r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Mouse glow
+    if (!isIdle && mx > 0) {
+      const age = (now - lastMove) / 1000;
+      const fade = Math.max(0, 1 - age * 1.2);
+      if (fade > 0.01) {
+        ctx.globalAlpha = fade * 0.12;
+        const g = ctx.createRadialGradient(mx, my, 0, mx, my, INK_R * 0.7);
+        g.addColorStop(0, 'rgba(96,165,250,0.6)');
+        g.addColorStop(1, 'rgba(96,165,250,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(mx, my, INK_R * 0.7, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

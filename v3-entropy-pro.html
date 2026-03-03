@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<!--
+╔══════════════════════════════════════════════════════════════════╗
+║  V3 ENTROPY PRO — 熵減自組織場 (Entropy Self-Organization)       ║
+║  Version: 2.0.0 | Date: 2026-03-03                              ║
+╠══════════════════════════════════════════════════════════════════╣
+║  AI TECHNICAL SPECIFICATION                                      ║
+║  ■ 核心視覺：秩序(垂直流)↔混沌(隨機散佈)的動態轉換               ║
+║  ■ 互動邏輯：                                                    ║
+║    - 全域熵值：0=秩序(字符成流), 1=混沌(字符散亂)                 ║
+║    - 閒置：熵值自動下降→字符自組織成垂直流                        ║
+║    - 滑鼠移動：提升全域熵 + 局部擾動(字符被推散)                  ║
+║    - 每個粒子有獨立局部熵值                                      ║
+║  ■ 色彩：混沌=暗灰暖色, 秩序=明亮青色流                          ║
+║  ■ 特效：擾動場環 + 熵值儀表                                     ║
+║  ■ 效能升級：預渲染紋理 + HiDPI + 狀態機優化                     ║
+╚══════════════════════════════════════════════════════════════════╝
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>V3 ENTROPY PRO — 熵減自組織場 v2.0</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #020617; overflow: hidden; cursor: crosshair; }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  .vignette {
+    position: fixed; inset: 0; z-index: 5; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 35%, rgba(2,6,23,0.55) 100%);
+  }
+  .scanlines {
+    position: fixed; inset: 0; z-index: 6; pointer-events: none; opacity: 0.2;
+    background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.12) 3px, rgba(0,0,0,0.12) 4px);
+  }
+  .label {
+    position: fixed; bottom: 24px; right: 24px;
+    z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.3em; color: rgba(8,145,178,0.35);
+  }
+  .fps { position: fixed; top: 12px; right: 16px; z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: rgba(34,211,238,0.4); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="vignette"></div>
+<div class="scanlines"></div>
+<div class="label">V3 ENTROPY PRO // 熵減自組織場 v2.0 · 滑鼠擾動秩序</div>
+<div class="fps" id="fps"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const ORDERED_CHARS = 'SICT語意永生記憶上傳L0L1L2L3L4L5L6L7L8L9'.split('');
+  const CHAOS_CHARS = '░▒▓█▄▀■□▪▫◘◙◚◛◜◝◞◟◠◡∑∂∇⊕⊗≡01010101'.split('');
+  const ALL_CHARS = [...ORDERED_CHARS, ...CHAOS_CHARS];
+
+  const COUNT = 900;
+  const DISRUPTION_R = 200;
+  const IDLE_MS = 2500;
+  const STREAMS = 18;
+  const FONT_SIZE_BASE = 14;
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  let W, H;
+  const streamXs = [];
+
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    for (let i = 0; i < STREAMS; i++) streamXs[i] = (i + 0.5) * (W / STREAMS);
+    particles.forEach((p, i) => { p.streamX = streamXs[i % STREAMS]; });
+  }
+
+  // ── Pre-render textures ────────────────────────────
+  const texCache = new Map();
+  function getCharTex(char, size, fillColor, glowColor, glowSize) {
+    const key = `${char}|${size}|${fillColor}|${glowSize}`;
+    if (texCache.has(key)) return texCache.get(key);
+    const pad = Math.max(glowSize * 2, 2) + 4;
+    const tw = size + pad * 2;
+    const oc = document.createElement('canvas');
+    const octx = oc.getContext('2d');
+    oc.width = tw * dpr; oc.height = tw * dpr;
+    octx.scale(dpr, dpr);
+    octx.font = `bold ${size}px "JetBrains Mono", monospace`;
+    octx.textAlign = 'center'; octx.textBaseline = 'middle';
+    if (glowSize > 0) {
+      octx.shadowBlur = glowSize; octx.shadowColor = glowColor;
+      octx.fillStyle = glowColor;
+      octx.fillText(char, tw / 2, tw / 2);
+      octx.fillText(char, tw / 2, tw / 2);
+    }
+    octx.shadowBlur = 0; octx.fillStyle = fillColor;
+    octx.fillText(char, tw / 2, tw / 2);
+    const result = { canvas: oc, w: tw };
+    texCache.set(key, result);
+    return result;
+  }
+
+  // ── Particles ──────────────────────────────────────
+  const particles = new Array(COUNT);
+  for (let i = 0; i < COUNT; i++) {
+    const si = i % STREAMS;
+    particles[i] = {
+      streamIdx: si,
+      streamX: 0, // set in resize
+      streamY: Math.random() * (H || 800),
+      streamVY: (Math.random() * 0.4 + 0.25) * 0.9,
+      chaosX: Math.random() * (W || 1200),
+      chaosY: Math.random() * (H || 800),
+      chaosDvx: (Math.random() - 0.5) * 0.4,
+      chaosDvy: (Math.random() - 0.5) * 0.4,
+      x: Math.random() * (W || 1200),
+      y: Math.random() * (H || 800),
+      localEntropy: 0.7 + Math.random() * 0.3,
+      char: ALL_CHARS[Math.floor(Math.random() * ALL_CHARS.length)],
+      charTimer: 0,
+      alpha: Math.random() * 0.4 + 0.15,
+      bright: Math.random(),
+      size: 10 + Math.random() * 5,
+    };
+  }
+
+  resize();
+  window.addEventListener('resize', resize);
+
+  let mx = -9999, my = -9999, lastMove = 0, isIdle = true;
+  let globalEntropy = 0.8;
+
+  window.addEventListener('mousemove', e => {
+    mx = e.clientX; my = e.clientY; lastMove = performance.now(); isIdle = false;
+    globalEntropy = Math.min(1, globalEntropy + 0.008);
+  });
+  window.addEventListener('mouseleave', () => { mx = -9999; my = -9999; isIdle = true; });
+
+  let frameCount = 0, lastFpsTime = performance.now();
+  const fpsEl = document.getElementById('fps');
+
+  function draw(now) {
+    requestAnimationFrame(draw);
+
+    frameCount++;
+    if (now - lastFpsTime >= 1000) {
+      fpsEl.textContent = frameCount + ' FPS'; frameCount = 0; lastFpsTime = now;
+    }
+
+    if (!isIdle && now - lastMove > IDLE_MS) isIdle = true;
+
+    if (isIdle) globalEntropy = Math.max(0, globalEntropy - 0.0015);
+    else globalEntropy = Math.min(1, globalEntropy + 0.002);
+
+    const trailOpacity = 0.12 + (1 - globalEntropy) * 0.08;
+    ctx.fillStyle = `rgba(2, 6, 23, ${trailOpacity})`;
+    ctx.fillRect(0, 0, W, H);
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+
+      p.charTimer++;
+      const changeSpeed = Math.floor(8 + (1 - p.localEntropy) * 40);
+      if (p.charTimer >= changeSpeed) {
+        p.char = p.localEntropy < 0.35
+          ? ORDERED_CHARS[Math.floor(Math.random() * ORDERED_CHARS.length)]
+          : ALL_CHARS[Math.floor(Math.random() * ALL_CHARS.length)];
+        p.charTimer = 0;
+      }
+
+      const dx = p.x - mx, dy = p.y - my;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const nearMouse = !isIdle && dist < DISRUPTION_R;
+
+      if (nearMouse) p.localEntropy = Math.min(1, p.localEntropy + 0.04);
+      else p.localEntropy = Math.max(globalEntropy * 0.7, p.localEntropy - 0.008);
+
+      const entropy = p.localEntropy;
+
+      if (entropy > 0.5 && nearMouse) {
+        const push = (1 - dist / DISRUPTION_R) * 2.5;
+        p.x += (dx / (dist || 1)) * push + p.chaosDvx;
+        p.y += (dy / (dist || 1)) * push + p.chaosDvy;
+        p.chaosDvx *= 0.98; p.chaosDvy *= 0.98;
+        if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+        if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+      } else if (entropy > 0.4) {
+        p.chaosX += p.chaosDvx; p.chaosY += p.chaosDvy;
+        if (p.chaosX < 0 || p.chaosX > W) p.chaosDvx *= -1;
+        if (p.chaosY < 0 || p.chaosY > H) p.chaosDvy *= -1;
+        p.x += (p.chaosX - p.x) * 0.04;
+        p.y += (p.chaosY - p.y) * 0.04;
+      } else {
+        p.streamY += p.streamVY * FONT_SIZE_BASE;
+        if (p.streamY > H) p.streamY = -20;
+        const lf = (1 - entropy) * 0.12;
+        p.x += (p.streamX - p.x) * lf;
+        p.y += (p.streamY - p.y) * lf;
+      }
+
+      // Color
+      const orderedFrac = 1 - entropy;
+      let fillColor, glowColor = '', glowSize = 0, alpha;
+
+      if (entropy > 0.7) {
+        alpha = p.alpha * 0.5;
+        fillColor = `hsl(${200 + (entropy - 0.7) * 100},20%,${25 + p.bright * 15}%)`;
+      } else if (entropy > 0.3) {
+        const t = (entropy - 0.3) / 0.4;
+        alpha = p.alpha * (0.5 + (1 - t) * 0.4);
+        fillColor = `hsl(${200 - t * 30},${70 + (1 - t) * 20}%,${35 + (1 - t) * 30}%)`;
+      } else {
+        alpha = p.alpha + orderedFrac * 0.35;
+        if (p.bright > 0.9) {
+          fillColor = '#ffffff'; glowColor = '#38bdf8'; glowSize = 10;
+        } else {
+          fillColor = `hsl(195,95%,${50 + orderedFrac * 25}%)`;
+          if (orderedFrac > 0.8) { glowColor = '#06b6d4'; glowSize = 5; }
+        }
+      }
+
+      const sz = Math.round(p.size);
+      const tex = getCharTex(p.char, sz, fillColor, glowColor, glowSize);
+      ctx.globalAlpha = Math.min(alpha, 1.0);
+      ctx.drawImage(tex.canvas, 0, 0, tex.canvas.width, tex.canvas.height,
+                    Math.round(p.x - tex.w / 2), Math.round(p.y - tex.w / 2), tex.w, tex.w);
+    }
+
+    ctx.globalAlpha = 1;
+
+    // Disruption field
+    if (!isIdle && mx > 0) {
+      const age = (now - lastMove) / 1000;
+      const fade = Math.max(0, 1 - age * 0.8);
+      ctx.globalAlpha = fade * 0.08;
+      ctx.strokeStyle = '#f0abfc'; ctx.lineWidth = 0.5;
+      for (let r = 30; r < DISRUPTION_R; r += 40) {
+        ctx.beginPath();
+        ctx.arc(Math.round(mx), Math.round(my), r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      // Center glow
+      ctx.globalAlpha = fade * 0.35;
+      const g = ctx.createRadialGradient(mx, my, 0, mx, my, 40);
+      g.addColorStop(0, 'rgba(217,70,239,0.4)');
+      g.addColorStop(0.5, 'rgba(6,182,212,0.15)');
+      g.addColorStop(1, 'rgba(6,182,212,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(mx, my, 40, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Entropy meter
+    ctx.globalAlpha = 0.5;
+    ctx.font = '9px "JetBrains Mono", monospace';
+    ctx.fillStyle = '#164e63';
+    const mW = 120, mH = 4, mX = 24, mY = H - 28;
+    ctx.fillRect(mX, mY, mW, mH);
+    const ec = globalEntropy > 0.6 ? '#f0abfc' : globalEntropy > 0.3 ? '#22d3ee' : '#34d399';
+    ctx.fillStyle = ec; ctx.globalAlpha = 0.7;
+    ctx.fillRect(mX, mY, mW * globalEntropy, mH);
+    ctx.globalAlpha = 0.4; ctx.fillStyle = '#7dd3fc';
+    ctx.fillText(`ENTROPY ${Math.round(globalEntropy * 100)}%`, mX, mY - 6);
+    ctx.globalAlpha = 1;
+  }
+
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

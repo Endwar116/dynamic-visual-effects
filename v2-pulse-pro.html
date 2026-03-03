@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<!--
+╔══════════════════════════════════════════════════════════════════╗
+║  V2 PULSE PRO — 語義震波場 (Semantic Pulse Wave)                 ║
+║  Version: 2.0.0 | Date: 2026-03-03                              ║
+╠══════════════════════════════════════════════════════════════════╣
+║  AI TECHNICAL SPECIFICATION                                      ║
+║  ■ 核心視覺：網格排列字符 + 波紋擴散位移                          ║
+║  ■ 互動邏輯：                                                    ║
+║    - 滑鼠移動：沿路徑生成震波，字符被波前推移                      ║
+║    - 點擊：生成強力震波                                           ║
+║    - 閒置：中心自動生成環境波紋                                   ║
+║    - 滑鼠靠近：字符被微微推開                                     ║
+║  ■ 色彩：深太空藍底 + 波前亮白→青色漸變                           ║
+║  ■ 效能升級：預渲染紋理 + HiDPI + TypedArray 座標                 ║
+╚══════════════════════════════════════════════════════════════════╝
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>V2 PULSE PRO — 語義震波場 v2.0</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #020617; overflow: hidden; cursor: crosshair; }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  .vignette {
+    position: fixed; inset: 0; z-index: 5; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 40%, rgba(2,6,23,0.6) 100%);
+  }
+  .scanlines {
+    position: fixed; inset: 0; z-index: 6; pointer-events: none; opacity: 0.25;
+    background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.12) 3px, rgba(0,0,0,0.12) 4px);
+  }
+  .label {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.4em; color: rgba(8,145,178,0.35);
+  }
+  .fps { position: fixed; top: 12px; right: 16px; z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: rgba(34,211,238,0.4); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="vignette"></div>
+<div class="scanlines"></div>
+<div class="label">V2 PULSE PRO // 語義震波場 v2.0 · 點擊生成波紋</div>
+<div class="fps" id="fps"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const CHARS = '01SICT語意永生記憶∑∂∇⊕⊗≡◈L0L1L2ｱｲｳｴｵｶｷｸ'.split('');
+  const IDLE_MS = 1800;
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  let W, H, GRID_COLS, GRID_ROWS, CHAR_W, CHAR_H;
+  let grid = [];
+
+  function buildGrid() {
+    GRID_COLS = Math.floor(W / 28);
+    GRID_ROWS = Math.floor(H / 28);
+    CHAR_W = W / GRID_COLS;
+    CHAR_H = H / GRID_ROWS;
+    grid = [];
+    for (let r = 0; r < GRID_ROWS; r++) {
+      for (let c = 0; c < GRID_COLS; c++) {
+        grid.push({
+          baseX: (c + 0.5) * CHAR_W,
+          baseY: (r + 0.5) * CHAR_H,
+          x: (c + 0.5) * CHAR_W,
+          y: (r + 0.5) * CHAR_H,
+          char: CHARS[Math.floor(Math.random() * CHARS.length)],
+          charTimer: 0,
+          charInterval: Math.floor(Math.random() * 60 + 30),
+          phase: Math.random() * Math.PI * 2,
+          alpha: Math.random() * 0.2 + 0.08,
+          bright: Math.random(),
+          size: 9 + Math.random() * 4,
+        });
+      }
+    }
+  }
+
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    buildGrid();
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // ── Pre-render char textures ───────────────────────
+  const texCache = new Map();
+  function getCharTex(char, size, fillColor, glowColor, glowSize) {
+    const key = `${char}|${size}|${fillColor}|${glowSize}`;
+    if (texCache.has(key)) return texCache.get(key);
+    const pad = Math.max(glowSize * 2, 2) + 4;
+    const tw = size + pad * 2;
+    const oc = document.createElement('canvas');
+    const octx = oc.getContext('2d');
+    oc.width = tw * dpr; oc.height = tw * dpr;
+    octx.scale(dpr, dpr);
+    octx.font = `bold ${size}px "JetBrains Mono", monospace`;
+    octx.textAlign = 'center'; octx.textBaseline = 'middle';
+    if (glowSize > 0) {
+      octx.shadowBlur = glowSize; octx.shadowColor = glowColor;
+      octx.fillStyle = glowColor;
+      octx.fillText(char, tw / 2, tw / 2);
+      octx.fillText(char, tw / 2, tw / 2);
+    }
+    octx.shadowBlur = 0; octx.fillStyle = fillColor;
+    octx.fillText(char, tw / 2, tw / 2);
+    const result = { canvas: oc, w: tw, pad };
+    texCache.set(key, result);
+    return result;
+  }
+
+  // ── Waves ──────────────────────────────────────────
+  const waves = [];
+  let lastWaveTime = 0;
+  function spawnWave(x, y) { waves.push({ x, y, age: 0, maxAge: 90, speed: 5.5 }); }
+
+  let mx = W / 2, my = H / 2, lastMove = 0, isIdle = false;
+  window.addEventListener('mousemove', e => {
+    mx = e.clientX; my = e.clientY; lastMove = performance.now(); isIdle = false;
+    const now = performance.now();
+    if (now - lastWaveTime > 180) { spawnWave(e.clientX, e.clientY); lastWaveTime = now; }
+  });
+  window.addEventListener('click', e => spawnWave(e.clientX, e.clientY));
+  window.addEventListener('mouseleave', () => { isIdle = true; });
+
+  // Seed initial waves
+  setTimeout(() => spawnWave(W * 0.3, H * 0.4), 500);
+  setTimeout(() => spawnWave(W * 0.7, H * 0.6), 1200);
+
+  let ambientTimer = 0;
+  let frameCount = 0, lastFpsTime = performance.now();
+  const fpsEl = document.getElementById('fps');
+
+  // Pre-render mouse glow
+  const mouseGlowCanvas = document.createElement('canvas');
+  const mgCtx = mouseGlowCanvas.getContext('2d');
+  mouseGlowCanvas.width = 160 * dpr; mouseGlowCanvas.height = 160 * dpr;
+  mgCtx.scale(dpr, dpr);
+  const mg = mgCtx.createRadialGradient(80, 80, 0, 80, 80, 80);
+  mg.addColorStop(0, 'rgba(6,182,212,0.6)');
+  mg.addColorStop(1, 'rgba(6,182,212,0)');
+  mgCtx.fillStyle = mg;
+  mgCtx.fillRect(0, 0, 160, 160);
+
+  function draw(now) {
+    requestAnimationFrame(draw);
+
+    frameCount++;
+    if (now - lastFpsTime >= 1000) {
+      fpsEl.textContent = frameCount + ' FPS'; frameCount = 0; lastFpsTime = now;
+    }
+
+    if (!isIdle && now - lastMove > IDLE_MS) isIdle = true;
+
+    ambientTimer++;
+    if (isIdle && ambientTimer % 120 === 0) {
+      spawnWave(W / 2 + (Math.random() - 0.5) * 200, H / 2 + (Math.random() - 0.5) * 200);
+    }
+
+    ctx.fillStyle = 'rgba(2, 6, 23, 0.25)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Update waves
+    for (let wi = waves.length - 1; wi >= 0; wi--) {
+      waves[wi].age++;
+      if (waves[wi].age >= waves[wi].maxAge) waves.splice(wi, 1);
+    }
+
+    // Draw grid
+    for (let i = 0; i < grid.length; i++) {
+      const p = grid[i];
+
+      if (++p.charTimer >= p.charInterval) {
+        p.char = CHARS[Math.floor(Math.random() * CHARS.length)];
+        p.charTimer = 0;
+      }
+      p.phase += 0.008;
+
+      let totalDispX = 0, totalDispY = 0, maxWaveInfl = 0;
+
+      for (let wi = 0; wi < waves.length; wi++) {
+        const w = waves[wi];
+        const dx = p.baseX - w.x, dy = p.baseY - w.y;
+        const baseDist = Math.sqrt(dx * dx + dy * dy);
+        const waveFront = w.age * w.speed;
+        const distFromFront = Math.abs(baseDist - waveFront);
+
+        if (distFromFront < 55) {
+          const progress = w.age / w.maxAge;
+          const amplitude = Math.sin(distFromFront / 55 * Math.PI) * (1 - progress) * 14;
+          const decay = Math.max(0, 1 - baseDist / 600);
+          const disp = amplitude * decay;
+          if (baseDist > 0) {
+            totalDispX += (dx / baseDist) * disp;
+            totalDispY += (dy / baseDist) * disp;
+          }
+          maxWaveInfl = Math.max(maxWaveInfl, (1 - progress) * decay * Math.sin(distFromFront / 55 * Math.PI));
+        }
+      }
+
+      // Mouse proximity
+      const mdx = p.baseX - mx, mdy = p.baseY - my;
+      const mDist = Math.sqrt(mdx * mdx + mdy * mdy);
+      const mInfl = Math.max(0, 1 - mDist / 160);
+      if (mInfl > 0 && !isIdle) {
+        totalDispX += (mdx / (mDist || 1)) * mInfl * 8;
+        totalDispY += (mdy / (mDist || 1)) * mInfl * 8;
+      }
+
+      totalDispX += Math.sin(p.phase) * 1.2;
+      totalDispY += Math.cos(p.phase * 0.7) * 1.2;
+
+      p.x = p.baseX + totalDispX;
+      p.y = p.baseY + totalDispY;
+
+      const baseAlpha = p.alpha * (0.7 + 0.3 * Math.sin(p.phase));
+      const waveAlpha = Math.min(baseAlpha + maxWaveInfl * 0.7, 1.0);
+
+      let fillColor, glowColor, glowSize;
+      if (maxWaveInfl > 0.5) {
+        fillColor = '#ffffff'; glowColor = '#38bdf8'; glowSize = 12;
+      } else if (maxWaveInfl > 0.2) {
+        const h = 185 + maxWaveInfl * 20;
+        fillColor = `hsl(${h},90%,${55 + maxWaveInfl * 30}%)`; glowColor = '#06b6d4'; glowSize = 6;
+      } else if (mInfl > 0.3 && !isIdle) {
+        fillColor = '#22d3ee'; glowColor = ''; glowSize = 0;
+      } else {
+        fillColor = `hsl(200,70%,${28 + p.bright * 18}%)`; glowColor = ''; glowSize = 0;
+      }
+
+      const sz = Math.round(p.size);
+      const tex = getCharTex(p.char, sz, fillColor, glowColor, glowSize);
+      ctx.globalAlpha = waveAlpha;
+      ctx.drawImage(tex.canvas, 0, 0, tex.canvas.width, tex.canvas.height,
+                    Math.round(p.x - tex.w / 2), Math.round(p.y - tex.w / 2), tex.w, tex.w);
+    }
+
+    ctx.globalAlpha = 1;
+
+    // Wave rings
+    for (let wi = 0; wi < waves.length; wi++) {
+      const w = waves[wi];
+      const progress = w.age / w.maxAge;
+      const r = w.age * w.speed;
+      const opacity = (1 - progress) * 0.12;
+      if (opacity < 0.01) continue;
+      ctx.globalAlpha = opacity;
+      ctx.strokeStyle = '#06b6d4';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(Math.round(w.x), Math.round(w.y), r, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // Mouse glow
+    if (!isIdle && mx > 0) {
+      ctx.globalAlpha = 0.2;
+      ctx.drawImage(mouseGlowCanvas, 0, 0, mouseGlowCanvas.width, mouseGlowCanvas.height,
+                    mx - 80, my - 80, 160, 160);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

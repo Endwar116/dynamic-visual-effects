@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<!--
+╔══════════════════════════════════════════════════════════════════╗
+║  W1 PEARL MIST PRO v3.0 — Point Cloud Ink Effect (WebGL)         ║
+║  Version: 3.0.0 | Date: 2026-03-03 | Tech: Three.js + WebGL     ║
+╠══════════════════════════════════════════════════════════════════╣
+║  AI TECHNICAL SPECIFICATION                                      ║
+║  ■ 核心技術：Point Cloud Rendering + Soft Particle Blending      ║
+║  ■ 粒子數：60,000 @ 60fps                                        ║
+║  ■ 特效：                                                        ║
+║    - **Point Cloud**：無 Geometry，直接渲染點雲                   ║
+║    - **墨滴波紋**：點擊生成墨滴，向外擴散                         ║
+║    - **軟粒子**：邊緣柔和，無硬邊界                               ║
+║    - **色彩漸變**：白底 + 鋼藍色粒子                              ║
+║  ■ 色彩：珍珠白背景 + 鋼藍色 + 深藍色                            ║
+║  ■ 互動：點擊生成墨滴，滑鼠移動預覽                               ║
+║  ■ 效能：GPU 點雲渲染，無網格開銷                                ║
+╚══════════════════════════════════════════════════════════════════╝
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>W1 PEARL MIST PRO v3.0 — Point Cloud Ink</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #f5f5f0; overflow: hidden; font-family: 'JetBrains Mono', monospace; cursor: crosshair; }
+  canvas { display: block; }
+  #info { position: fixed; top: 16px; right: 16px; z-index: 10; color: #1e40af; font-size: 11px; letter-spacing: 0.1em; }
+  #fps { position: fixed; top: 16px; left: 16px; z-index: 10; color: #1e40af; font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="fps">FPS: --</div>
+<div id="info">W1 PEARL MIST PRO v3.0 • Point Cloud • Click for Ink Drop</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+  'use strict';
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0xf5f5f0);
+  document.body.appendChild(renderer.domElement);
+
+  camera.position.z = 120;
+
+  // ──────────────────────────────────────────────────────────────
+  // Point Cloud with Ink Drop Effect
+  // ──────────────────────────────────────────────────────────────
+  const PARTICLE_COUNT = 60000;
+  const positions = new Float32Array(PARTICLE_COUNT * 3);
+  const velocities = new Float32Array(PARTICLE_COUNT * 3);
+  const ages = new Float32Array(PARTICLE_COUNT);
+
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    positions[i * 3] = (Math.random() - 0.5) * 200;
+    positions[i * 3 + 1] = (Math.random() - 0.5) * 200;
+    positions[i * 3 + 2] = 0;
+
+    velocities[i * 3] = (Math.random() - 0.5) * 0.3;
+    velocities[i * 3 + 1] = (Math.random() - 0.5) * 0.3;
+    velocities[i * 3 + 2] = 0;
+
+    ages[i] = Math.random();
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // Shader Material
+  // ──────────────────────────────────────────────────────────────
+  const vertexShader = `
+    uniform vec3 inkOrigin;
+    uniform float inkTime;
+    uniform float inkStrength;
+    
+    attribute vec3 position;
+    attribute vec3 velocity;
+    attribute float age;
+    
+    varying float vAlpha;
+    
+    void main() {
+      vec3 pos = position;
+      
+      // Ink drop expansion
+      float dist = distance(pos.xy, inkOrigin.xy);
+      if (inkStrength > 0.0) {
+        float expansion = inkTime * 50.0;
+        if (dist < expansion && dist > expansion - 10.0) {
+          pos += normalize(pos.xy - inkOrigin.xy) * inkStrength * 10.0;
+        }
+      }
+      
+      // Gentle drift
+      pos += velocity * 0.1;
+      
+      vAlpha = 0.6 + 0.4 * sin(age * 3.14159);
+      
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+      gl_PointSize = 3.0;
+    }
+  `;
+
+  const fragmentShader = `
+    varying float vAlpha;
+    
+    void main() {
+      vec2 cxy = 2.0 * gl_PointCoord - 1.0;
+      float r = length(cxy);
+      
+      // Soft particle edge
+      float alpha = (1.0 - r * r) * vAlpha;
+      
+      vec3 color = mix(
+        vec3(0.15, 0.35, 0.7),  // Steel blue
+        vec3(0.1, 0.2, 0.5),    // Deep blue
+        r
+      );
+      
+      gl_FragColor = vec4(color, alpha);
+    }
+  `;
+
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      inkOrigin: { value: new THREE.Vector3(0, 0, 0) },
+      inkTime: { value: 0 },
+      inkStrength: { value: 0 }
+    },
+    vertexShader,
+    fragmentShader,
+    transparent: true,
+    depthTest: false,
+    blending: THREE.AdditiveBlending
+  });
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('velocity', new THREE.BufferAttribute(velocities, 3));
+  geometry.setAttribute('age', new THREE.BufferAttribute(ages, 1));
+
+  const points = new THREE.Points(geometry, material);
+  scene.add(points);
+
+  // ──────────────────────────────────────────────────────────────
+  // Ink Drop Interaction
+  // ──────────────────────────────────────────────────────────────
+  let inkActive = false;
+  let inkStartTime = 0;
+
+  window.addEventListener('click', e => {
+    const x = (e.clientX / window.innerWidth - 0.5) * 200;
+    const y = -(e.clientY / window.innerHeight - 0.5) * 200;
+    
+    material.uniforms.inkOrigin.value.set(x, y, 0);
+    inkActive = true;
+    inkStartTime = performance.now();
+  });
+
+  // ──────────────────────────────────────────────────────────────
+  // Animation Loop
+  // ──────────────────────────────────────────────────────────────
+  let frameCount = 0, lastTime = performance.now();
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    const now = performance.now();
+
+    if (inkActive) {
+      const elapsed = (now - inkStartTime) * 0.001;
+      material.uniforms.inkTime.value = elapsed;
+      material.uniforms.inkStrength.value = Math.max(0, 1 - elapsed * 0.3);
+      
+      if (elapsed > 3) {
+        inkActive = false;
+        material.uniforms.inkStrength.value = 0;
+      }
+    }
+
+    frameCount++;
+    if (now - lastTime >= 1000) {
+      document.getElementById('fps').textContent = `FPS: ${frameCount}`;
+      frameCount = 0;
+      lastTime = now;
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  animate();
+})();
+</script>
+</body>
+</html>

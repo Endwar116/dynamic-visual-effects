@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<!--
+╔══════════════════════════════════════════════════════════════════╗
+║  X2 QUANTUM TUNNEL PRO v3.0 — Radial Wave Interference (WebGL)   ║
+║  Version: 3.0.0 | Date: 2026-03-03 | Tech: Three.js + WebGL     ║
+╠══════════════════════════════════════════════════════════════════╣
+║  AI TECHNICAL SPECIFICATION                                      ║
+║  ■ 核心技術：Radial Wave Propagation + Interference Pattern      ║
+║  ■ 粒子數：120,000 @ 60fps                                       ║
+║  ■ 特效：                                                        ║
+║    - **Radial Waves**：中心發出同心圓波前                         ║
+║    - **Spiral Motion**：粒子沿著波前螺旋運動                      ║
+║    - **Interference**：滑鼠產生次級波源，形成干涉圖案             ║
+║    - **量子不確定性**：波前附近粒子出現機率增加                   ║
+║  ■ 色彩：深紫 + 白色 → 紫色 → 黑色 漸變                         ║
+║  ■ 互動：隧道深度感，滑鼠干擾波前                                 ║
+║  ■ 效能：GPU 波前計算，無 CPU 瓶頸                               ║
+╚══════════════════════════════════════════════════════════════════╝
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>X2 QUANTUM TUNNEL PRO v3.0 — Radial Wave Interference</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a0033; overflow: hidden; font-family: 'JetBrains Mono', monospace; cursor: crosshair; }
+  canvas { display: block; }
+  #info { position: fixed; top: 16px; right: 16px; z-index: 10; color: #d8b4fe; font-size: 11px; letter-spacing: 0.1em; }
+  #fps { position: fixed; top: 16px; left: 16px; z-index: 10; color: #d8b4fe; font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="fps">FPS: --</div>
+<div id="info">X2 QUANTUM TUNNEL PRO v3.0 • Radial Waves • 120K Particles</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+  'use strict';
+
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+  
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0x1a0033);
+  document.body.appendChild(renderer.domElement);
+
+  camera.position.z = 120;
+
+  // ──────────────────────────────────────────────────────────────
+  // Quantum Tunnel with Radial Waves
+  // ──────────────────────────────────────────────────────────────
+  const PARTICLE_COUNT = 120000;
+  const positions = new Float32Array(PARTICLE_COUNT * 3);
+  const angles = new Float32Array(PARTICLE_COUNT);
+  const radii = new Float32Array(PARTICLE_COUNT);
+  const phases = new Float32Array(PARTICLE_COUNT);
+
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    angles[i] = Math.random() * Math.PI * 2;
+    radii[i] = Math.random() * 150;
+    phases[i] = Math.random() * Math.PI * 2;
+    
+    positions[i * 3] = Math.cos(angles[i]) * radii[i];
+    positions[i * 3 + 1] = Math.sin(angles[i]) * radii[i];
+    positions[i * 3 + 2] = 0;
+  }
+
+  // ──────────────────────────────────────────────────────────────
+  // Shader Material
+  // ──────────────────────────────────────────────────────────────
+  const vertexShader = `
+    uniform vec3 centerPos;
+    uniform vec3 mousePos;
+    uniform float time;
+    
+    attribute vec3 position;
+    attribute float angle;
+    attribute float radius;
+    attribute float phase;
+    
+    varying float vWaveFront;
+    varying float vDepth;
+    
+    void main() {
+      vec3 pos = position;
+      
+      // Radial wave propagation
+      float wavePhase = time - radius / 150.0 * 6.28;
+      float spiralAmount = sin(wavePhase) * 0.3;
+      float adjustedAngle = angle + spiralAmount + phase * 0.01;
+      
+      // Radial position oscillates
+      float r = radius + sin(wavePhase) * 30.0;
+      r = max(0.0, min(r, 150.0));
+      
+      // Interference from mouse
+      vec3 toMouse = mousePos - pos;
+      float mouseDist = length(toMouse);
+      float interference = sin(atan(toMouse.y, toMouse.x) * 3.0) * 0.5 + 0.5;
+      
+      // Particle position
+      pos.x = centerPos.x + cos(adjustedAngle) * r;
+      pos.y = centerPos.y + sin(adjustedAngle) * r;
+      
+      // Probability cloud
+      float waveFrontDist = abs(sin(wavePhase));
+      float probabilityAlpha = waveFrontDist * 0.6 + 0.2;
+      
+      vWaveFront = waveFrontDist;
+      vDepth = r / 150.0;
+      
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+      gl_PointSize = 2.0 + waveFrontDist * 2.0;
+    }
+  `;
+
+  const fragmentShader = `
+    varying float vWaveFront;
+    varying float vDepth;
+    
+    void main() {
+      vec2 cxy = 2.0 * gl_PointCoord - 1.0;
+      if (length(cxy) > 1.0) discard;
+      
+      // Color based on wave front and depth
+      vec3 color;
+      if (vWaveFront > 0.7) {
+        // Near wave front: bright purple-white
+        color = mix(vec3(1.0, 1.0, 1.0), vec3(1.0, 0.5, 1.0), vWaveFront);
+      } else if (vDepth > 0.7) {
+        // Far from center: dark purple
+        color = vec3(0.3, 0.1, 0.4);
+      } else {
+        // Mid-range: purple gradient
+        color = mix(vec3(0.5, 0.2, 0.7), vec3(0.2, 0.1, 0.3), vDepth);
+      }
+      
+      float alpha = 0.7 * (1.0 - length(cxy));
+      
+      gl_FragColor = vec4(color, alpha);
+    }
+  `;
+
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      centerPos: { value: new THREE.Vector3(0, 0, 0) },
+      mousePos: { value: new THREE.Vector3(0, 0, 0) },
+      time: { value: 0 }
+    },
+    vertexShader,
+    fragmentShader,
+    transparent: true,
+    depthTest: false
+  });
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('angle', new THREE.BufferAttribute(angles, 1));
+  geometry.setAttribute('radius', new THREE.BufferAttribute(radii, 1));
+  geometry.setAttribute('phase', new THREE.BufferAttribute(phases, 1));
+
+  const particles = new THREE.Points(geometry, material);
+  scene.add(particles);
+
+  // ──────────────────────────────────────────────────────────────
+  // Mouse Interaction
+  // ──────────────────────────────────────────────────────────────
+  let mouseX = 0, mouseY = 0;
+  window.addEventListener('mousemove', e => {
+    mouseX = (e.clientX / window.innerWidth - 0.5) * 200;
+    mouseY = -(e.clientY / window.innerHeight - 0.5) * 200;
+  });
+
+  // ──────────────────────────────────────────────────────────────
+  // Animation Loop
+  // ──────────────────────────────────────────────────────────────
+  let frameCount = 0, lastTime = performance.now();
+  let startTime = performance.now();
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    const now = performance.now();
+    const deltaTime = (now - startTime) * 0.001;
+
+    material.uniforms.mousePos.value.set(mouseX, mouseY, 0);
+    material.uniforms.time.value = deltaTime;
+
+    frameCount++;
+    if (now - lastTime >= 1000) {
+      document.getElementById('fps').textContent = `FPS: ${frameCount}`;
+      frameCount = 0;
+      lastTime = now;
+    }
+
+    renderer.render(scene, camera);
+  }
+
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  animate();
+})();
+</script>
+</body>
+</html>

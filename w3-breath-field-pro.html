@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<!--
+╔══════════════════════════════════════════════════════════════════╗
+║  W3 BREATH FIELD PRO — 呼吸場 (Semantic Breath Field)            ║
+║  Version: 2.0.0 | Date: 2026-03-03                              ║
+║  INNOVATION: N-Body Attraction + Dynamic Color Mapping           ║
+╠══════════════════════════════════════════════════════════════════╣
+║  AI TECHNICAL SPECIFICATION                                      ║
+║  ■ 核心視覺：極簡白底 + 字符凝聚成語義雲                          ║
+║  ■ 創新點：                                                      ║
+║    - 不是預設軌道，而是**動態 N-Body 引力場**                     ║
+║    - 字符之間互相吸引（弱引力），形成自組織雲團                   ║
+║    - 色彩根據**局部密度**動態映射（密度→亮度→色溫）              ║
+║    - 滑鼠成為**強引力源**，吸引周圍字符                           ║
+║  ■ 色彩：純白底 + 密度低=灰色, 密度高=藍色, 最高=白色            ║
+║  ■ 特效：柔和多層光暈 + 密度熱力圖視覺化                          ║
+║  ■ 效能：空間分割(Grid) + 批次繪製 + 預渲染                       ║
+╚══════════════════════════════════════════════════════════════════╝
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>W3 BREATH FIELD PRO — 呼吸場 v2.0</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #ffffff; overflow: hidden; cursor: none; }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  .edge-fade {
+    position: fixed; inset: 0; z-index: 5; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(248,250,252,0.45) 100%);
+  }
+  .label {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.5em; color: rgba(203,213,225,0.35);
+  }
+  .fps { position: fixed; top: 12px; right: 16px; z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: rgba(148,163,184,0.3); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="edge-fade"></div>
+<div class="label">W3 BREATH FIELD PRO // 呼吸場 v2.0 · N-Body Attraction</div>
+<div class="fps" id="fps"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const CHARS = 'SICT語意永生記憶上傳∑∂∇⊕◈◇○L0L1L2L3'.split('');
+  const COUNT = 600;
+  const CLOUD_R = 260;
+  const IDLE_MS = 1800;
+  const GRID_SIZE = 80; // Spatial partitioning
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  let W, H;
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  const texCache = new Map();
+  function getCharTex(char, size, fillColor, glowColor, glowSize) {
+    const key = `${char}|${size}|${fillColor}|${glowSize}`;
+    if (texCache.has(key)) return texCache.get(key);
+    const pad = Math.max(glowSize * 2, 2) + 4;
+    const tw = size + pad * 2;
+    const oc = document.createElement('canvas');
+    const octx = oc.getContext('2d');
+    oc.width = tw * dpr; oc.height = tw * dpr;
+    octx.scale(dpr, dpr);
+    octx.font = `${size}px "JetBrains Mono", monospace`;
+    octx.textAlign = 'center'; octx.textBaseline = 'middle';
+    if (glowSize > 0) {
+      octx.shadowBlur = glowSize; octx.shadowColor = glowColor;
+      octx.fillStyle = glowColor;
+      octx.fillText(char, tw / 2, tw / 2);
+      octx.fillText(char, tw / 2, tw / 2);
+    }
+    octx.shadowBlur = 0; octx.fillStyle = fillColor;
+    octx.fillText(char, tw / 2, tw / 2);
+    const result = { canvas: oc, w: tw };
+    texCache.set(key, result);
+    return result;
+  }
+
+  // ── Particles with N-Body Physics ──────────────────
+  const particles = new Array(COUNT);
+  for (let i = 0; i < COUNT; i++) {
+    particles[i] = {
+      hx: Math.random() * (W || 1200), hy: Math.random() * (H || 800),
+      x: Math.random() * (W || 1200), y: Math.random() * (H || 800),
+      vx: 0, vy: 0, // Velocity for smooth motion
+      dvx: (Math.random() - 0.5) * 0.08, dvy: (Math.random() - 0.5) * 0.08,
+      char: CHARS[Math.floor(Math.random() * CHARS.length)],
+      charTimer: 0, charInterval: Math.floor(Math.random() * 60 + 30),
+      size: 10 + Math.random() * 10,
+      condensed: 0, condensedTarget: 0,
+      condenseSpeed: 0.02 + Math.random() * 0.025,
+      disperseSpeed: 0.008 + Math.random() * 0.012,
+      phase: Math.random() * Math.PI * 2,
+      phaseSpeed: 0.005 + Math.random() * 0.009,
+      localDensity: 0, // For color mapping
+    };
+  }
+
+  let mx = W / 2, my = H / 2, lastMove = 0, isIdle = false;
+  window.addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; lastMove = performance.now(); isIdle = false; });
+  window.addEventListener('mouseleave', () => { isIdle = true; });
+
+  let frameCount = 0, lastFpsTime = performance.now();
+  const fpsEl = document.getElementById('fps');
+
+  // ── Spatial Grid for N-Body Optimization ────────────
+  function getSpatialGrid() {
+    const grid = new Map();
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const gx = Math.floor(p.x / GRID_SIZE);
+      const gy = Math.floor(p.y / GRID_SIZE);
+      const key = gx + ',' + gy;
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(i);
+    }
+    return grid;
+  }
+
+  // ── Compute local density for each particle ────────
+  function computeDensities(grid) {
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const gx = Math.floor(p.x / GRID_SIZE);
+      const gy = Math.floor(p.y / GRID_SIZE);
+      let density = 0;
+      // Check 3x3 neighborhood
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const key = (gx + dx) + ',' + (gy + dy);
+          const cell = grid.get(key);
+          if (cell) {
+            for (let j = 0; j < cell.length; j++) {
+              if (i === cell[j]) continue;
+              const other = particles[cell[j]];
+              const ddx = p.x - other.x, ddy = p.y - other.y;
+              const d = Math.sqrt(ddx * ddx + ddy * ddy);
+              if (d < 100) density += (1 - d / 100) * 0.1;
+            }
+          }
+        }
+      }
+      p.localDensity = Math.min(1, density);
+    }
+  }
+
+  function draw(now) {
+    requestAnimationFrame(draw);
+
+    frameCount++;
+    if (now - lastFpsTime >= 1000) {
+      fpsEl.textContent = frameCount + ' FPS'; frameCount = 0; lastFpsTime = now;
+    }
+
+    if (!isIdle && now - lastMove > IDLE_MS) isIdle = true;
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.fillRect(0, 0, W, H);
+
+    const grid = getSpatialGrid();
+    computeDensities(grid);
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+
+      if (++p.charTimer >= p.charInterval) {
+        p.char = CHARS[Math.floor(Math.random() * CHARS.length)];
+        p.charTimer = 0;
+      }
+      p.phase += p.phaseSpeed;
+
+      // ── N-Body Attraction ──────────────────────────
+      let attractX = 0, attractY = 0;
+      const gx = Math.floor(p.x / GRID_SIZE);
+      const gy = Math.floor(p.y / GRID_SIZE);
+
+      // Check nearby particles for weak mutual attraction
+      for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          const key = (gx + dx) + ',' + (gy + dy);
+          const cell = grid.get(key);
+          if (cell) {
+            for (let j = 0; j < cell.length; j++) {
+              if (i === cell[j]) continue;
+              const other = particles[cell[j]];
+              const ddx = other.x - p.x, ddy = other.y - p.y;
+              const d = Math.sqrt(ddx * ddx + ddy * ddy);
+              if (d < 150 && d > 0.1) {
+                const force = (1 - d / 150) * 0.002; // Weak attraction
+                attractX += (ddx / d) * force;
+                attractY += (ddy / d) * force;
+              }
+            }
+          }
+        }
+      }
+
+      // ── Mouse as Strong Attractor ──────────────────
+      const dx = p.hx - mx, dy = p.hx - my;
+      const homeDist = Math.sqrt(dx * dx + dy * dy);
+      const inRange = !isIdle && homeDist < CLOUD_R * 1.4;
+
+      p.condensedTarget = inRange ? 1 : 0;
+      if (p.condensedTarget > p.condensed) {
+        p.condensed = Math.min(1, p.condensed + p.condenseSpeed);
+      } else {
+        p.condensed = Math.max(0, p.condensed - p.disperseSpeed);
+      }
+
+      // Apply velocity damping + attraction
+      p.vx = (p.vx + attractX) * 0.95;
+      p.vy = (p.vy + attractY) * 0.95;
+
+      // Home drift
+      p.hx += p.dvx; p.hy += p.dvy;
+      if (p.hx < -10) p.hx = W + 10; if (p.hx > W + 10) p.hx = -10;
+      if (p.hy < -10) p.hy = H + 10; if (p.hy > H + 10) p.hy = -10;
+
+      // Position: lerp to cloud or home
+      const tc = p.condensed;
+      const cloudX = mx + Math.cos(p.phase) * CLOUD_R * 0.7;
+      const cloudY = my + Math.sin(p.phase) * CLOUD_R * 0.7;
+      const targetX = p.hx + (cloudX - p.hx) * tc;
+      const targetY = p.hy + (cloudY - p.hy) * tc;
+
+      p.x += (targetX - p.x) * 0.06 + p.vx;
+      p.y += (targetY - p.y) * 0.06 + p.vy;
+
+      // ── Color based on local density ───────────────
+      const breath = 0.6 + 0.4 * Math.sin(p.phase);
+      const alpha = (0.03 + tc * 0.55) * breath;
+      if (alpha < 0.01) continue;
+
+      let fillColor, glowColor = '', glowSize = 0;
+
+      // Density-based color mapping
+      if (p.localDensity > 0.6) {
+        // High density: bright blue
+        fillColor = `hsl(210,${40 + p.localDensity * 40}%,${60 + p.localDensity * 20}%)`;
+        glowColor = 'rgba(147,197,253,0.5)'; glowSize = 6;
+      } else if (p.localDensity > 0.3) {
+        // Medium density: cool blue-grey
+        fillColor = `hsl(210,${25 + p.localDensity * 25}%,${65 + p.localDensity * 15}%)`;
+      } else {
+        // Low density: light grey
+        fillColor = `hsl(210,10%,${75 + p.localDensity * 15}%)`;
+      }
+
+      // Override for condensed state
+      if (tc > 0.7) {
+        const t = (tc - 0.7) / 0.3;
+        fillColor = `hsl(210,${35 + t * 25}%,${55 + t * 20}%)`;
+        if (tc > 0.9) { glowColor = 'rgba(147,197,253,0.5)'; glowSize = 8; }
+      }
+
+      const sz = Math.round(p.size);
+      const tex = getCharTex(p.char, sz, fillColor, glowColor, glowSize);
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(tex.canvas, 0, 0, tex.canvas.width, tex.canvas.height,
+                    Math.round(p.x - tex.w / 2), Math.round(p.y - tex.w / 2), tex.w, tex.w);
+    }
+
+    ctx.globalAlpha = 1;
+
+    // Semantic cloud aura
+    if (!isIdle && mx > 0) {
+      const age = (now - lastMove) / 1000;
+      const fade = Math.max(0, 1 - age * 0.7);
+      if (fade > 0.01) {
+        // Multi-layer soft halo
+        const layers = [
+          { r: CLOUD_R, alpha: 0.04 },
+          { r: CLOUD_R * 0.6, alpha: 0.06 },
+          { r: CLOUD_R * 0.25, alpha: 0.09 },
+        ];
+        for (let li = 0; li < layers.length; li++) {
+          const l = layers[li];
+          ctx.globalAlpha = fade * l.alpha;
+          const g = ctx.createRadialGradient(mx, my, 0, mx, my, l.r);
+          g.addColorStop(0, 'rgba(147,197,253,0.5)');
+          g.addColorStop(0.4, 'rgba(186,230,253,0.2)');
+          g.addColorStop(1, 'rgba(186,230,253,0)');
+          ctx.fillStyle = g;
+          ctx.beginPath(); ctx.arc(mx, my, l.r, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalAlpha = fade * 0.5;
+        ctx.fillStyle = 'rgba(96,165,250,0.8)';
+        ctx.beginPath(); ctx.arc(Math.round(mx), Math.round(my), 2.5, 0, Math.PI * 2); ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>

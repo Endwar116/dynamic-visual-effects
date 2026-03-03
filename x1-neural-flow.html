@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<!--
+╔══════════════════════════════════════════════════════════════════╗
+║  X1 NEURAL FLOW — 神經網路流場 (Neural Network Flow Field)       ║
+║  Version: 2.0.0 | Date: 2026-03-03                              ║
+║  INNOVATION: Perlin Noise Flow Field + Particle Advection        ║
+╠══════════════════════════════════════════════════════════════════╣
+║  AI TECHNICAL SPECIFICATION                                      ║
+║  ■ 核心視覺：字符沿著 Perlin 雜訊生成的流場流動                   ║
+║  ■ 創新點：                                                      ║
+║    - **Flow Field**：用 Perlin 雜訊生成速度場，字符沿著流線流動   ║
+║    - **Particle Advection**：每個字符由流場推動，形成漂亮的流線   ║
+║    - **滑鼠干擾**：滑鼠周圍產生漩渦，扭曲流場                     ║
+║    - **色彩映射**：根據流速大小映射顏色（快=紅, 慢=藍）           ║
+║  ■ 色彩：深黑底 + 流速熱力圖 (紅→黃→綠→藍)                       ║
+║  ■ 特效：流線軌跡 + 漩渦光暈 + 速度向量可視化                     ║
+║  ■ 效能：預計算流場網格 + 雙線性插值 + 批次繪製                   ║
+╚══════════════════════════════════════════════════════════════════╝
+-->
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>X1 NEURAL FLOW — 神經網路流場 v2.0</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #0a0e27; overflow: hidden; cursor: crosshair; }
+  canvas { display: block; position: absolute; top: 0; left: 0; }
+  .vignette {
+    position: fixed; inset: 0; z-index: 5; pointer-events: none;
+    background: radial-gradient(ellipse at center, transparent 30%, rgba(10,14,39,0.7) 100%);
+  }
+  .label {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    letter-spacing: 0.4em; color: rgba(34,211,238,0.35);
+  }
+  .fps { position: fixed; top: 12px; right: 16px; z-index: 10; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: rgba(34,211,238,0.4); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="vignette"></div>
+<div class="label">X1 NEURAL FLOW // 神經網路流場 v2.0 · Perlin Flow Field</div>
+<div class="fps" id="fps"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const CHARS = 'SICT∑∂∇⊕⊗≡◈◇●○◉★☆∞∫∮∯01αβγδεζηθλμνξπρστφχψω'.split('');
+  const COUNT = 1200;
+  const FLOW_GRID_SIZE = 40;
+
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d', { alpha: false });
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+  let W, H;
+  let flowGrid = [];
+
+  function resize() {
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    buildFlowGrid();
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  // ── Simple Perlin-like noise (using sine for simplicity) ────
+  function noise(x, y, t) {
+    return Math.sin(x * 0.01 + t * 0.001) * Math.cos(y * 0.01 + t * 0.0015) +
+           Math.sin((x + y) * 0.005) * Math.cos((x - y) * 0.007);
+  }
+
+  function buildFlowGrid() {
+    flowGrid = [];
+    const cols = Math.ceil(W / FLOW_GRID_SIZE) + 1;
+    const rows = Math.ceil(H / FLOW_GRID_SIZE) + 1;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const x = c * FLOW_GRID_SIZE;
+        const y = r * FLOW_GRID_SIZE;
+        flowGrid.push({ x, y, vx: 0, vy: 0 });
+      }
+    }
+  }
+
+  function updateFlowGrid(now, mx, my) {
+    for (let i = 0; i < flowGrid.length; i++) {
+      const cell = flowGrid[i];
+      const n = noise(cell.x, cell.y, now * 0.1);
+      const angle = n * Math.PI * 2;
+      let speed = 2 + Math.sin(now * 0.001 + cell.x * 0.001) * 1;
+
+      // Mouse vortex
+      if (mx > 0) {
+        const dx = cell.x - mx, dy = cell.y - my;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < 300) {
+          const vortexAngle = Math.atan2(dy, dx) + Math.PI / 2;
+          const vortexStrength = (1 - d / 300) * 3;
+          cell.vx = Math.cos(angle) * speed + Math.cos(vortexAngle) * vortexStrength;
+          cell.vy = Math.sin(angle) * speed + Math.sin(vortexAngle) * vortexStrength;
+          continue;
+        }
+      }
+
+      cell.vx = Math.cos(angle) * speed;
+      cell.vy = Math.sin(angle) * speed;
+    }
+  }
+
+  function getFlowVelocity(x, y) {
+    const col = Math.floor(x / FLOW_GRID_SIZE);
+    const row = Math.floor(y / FLOW_GRID_SIZE);
+    const cols = Math.ceil(W / FLOW_GRID_SIZE) + 1;
+
+    const c1 = Math.max(0, Math.min(col, cols - 1));
+    const r1 = Math.max(0, Math.min(row, Math.ceil(H / FLOW_GRID_SIZE)));
+    const idx = r1 * cols + c1;
+
+    if (idx >= 0 && idx < flowGrid.length) {
+      const cell = flowGrid[idx];
+      return { vx: cell.vx, vy: cell.vy };
+    }
+    return { vx: 0, vy: 0 };
+  }
+
+  const texCache = new Map();
+  function getCharTex(char, size, fillColor, glowColor, glowSize) {
+    const key = `${char}|${size}|${fillColor}|${glowSize}`;
+    if (texCache.has(key)) return texCache.get(key);
+    const pad = Math.max(glowSize * 2, 2) + 4;
+    const tw = size + pad * 2;
+    const oc = document.createElement('canvas');
+    const octx = oc.getContext('2d');
+    oc.width = tw * dpr; oc.height = tw * dpr;
+    octx.scale(dpr, dpr);
+    octx.font = `bold ${size}px "JetBrains Mono", monospace`;
+    octx.textAlign = 'center'; octx.textBaseline = 'middle';
+    if (glowSize > 0) {
+      octx.shadowBlur = glowSize; octx.shadowColor = glowColor;
+      octx.fillStyle = glowColor;
+      octx.fillText(char, tw / 2, tw / 2);
+      octx.fillText(char, tw / 2, tw / 2);
+    }
+    octx.shadowBlur = 0; octx.fillStyle = fillColor;
+    octx.fillText(char, tw / 2, tw / 2);
+    const result = { canvas: oc, w: tw };
+    texCache.set(key, result);
+    return result;
+  }
+
+  const particles = new Array(COUNT);
+  for (let i = 0; i < COUNT; i++) {
+    particles[i] = {
+      x: Math.random() * (W || 1200), y: Math.random() * (H || 800),
+      char: CHARS[Math.floor(Math.random() * CHARS.length)],
+      charTimer: 0, charInterval: Math.floor(Math.random() * 40 + 20),
+      size: 9 + Math.random() * 6,
+      speed: 0, // Current flow speed
+      alpha: Math.random() * 0.3 + 0.2,
+    };
+  }
+
+  let mx = -9999, my = -9999, lastMove = 0, isIdle = true;
+  window.addEventListener('mousemove', e => { mx = e.clientX; my = e.clientY; lastMove = performance.now(); isIdle = false; });
+  window.addEventListener('mouseleave', () => { mx = -9999; my = -9999; isIdle = true; });
+
+  let frameCount = 0, lastFpsTime = performance.now();
+  const fpsEl = document.getElementById('fps');
+
+  function draw(now) {
+    requestAnimationFrame(draw);
+
+    frameCount++;
+    if (now - lastFpsTime >= 1000) {
+      fpsEl.textContent = frameCount + ' FPS'; frameCount = 0; lastFpsTime = now;
+    }
+
+    ctx.fillStyle = 'rgba(10, 14, 39, 0.15)';
+    ctx.fillRect(0, 0, W, H);
+
+    updateFlowGrid(now, mx, my);
+
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+
+      if (++p.charTimer >= p.charInterval) {
+        p.char = CHARS[Math.floor(Math.random() * CHARS.length)];
+        p.charTimer = 0;
+      }
+
+      // Advect particle along flow field
+      const flow = getFlowVelocity(p.x, p.y);
+      p.x += flow.vx * 0.5;
+      p.y += flow.vy * 0.5;
+      p.speed = Math.sqrt(flow.vx * flow.vx + flow.vy * flow.vy);
+
+      // Wrap around
+      if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+      if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+
+      // ── Speed-based color mapping (hot to cold) ────
+      let fillColor, glowColor = '', glowSize = 0;
+      const speedNorm = Math.min(p.speed / 4, 1); // Normalize to 0-1
+
+      if (speedNorm > 0.7) {
+        // Fast: red
+        fillColor = `hsl(0, 100%, ${50 + speedNorm * 20}%)`;
+        glowColor = 'rgba(239,68,68,0.5)'; glowSize = 6;
+      } else if (speedNorm > 0.5) {
+        // Medium-fast: yellow-orange
+        fillColor = `hsl(${30 - speedNorm * 20}, 100%, ${55 + speedNorm * 15}%)`;
+        glowColor = 'rgba(251,146,60,0.3)'; glowSize = 3;
+      } else if (speedNorm > 0.3) {
+        // Medium: green-cyan
+        fillColor = `hsl(${150 + speedNorm * 30}, 80%, ${50 + speedNorm * 20}%)`;
+      } else {
+        // Slow: blue
+        fillColor = `hsl(210, 70%, ${45 + speedNorm * 20}%)`;
+      }
+
+      const sz = Math.round(p.size);
+      const tex = getCharTex(p.char, sz, fillColor, glowColor, glowSize);
+      ctx.globalAlpha = p.alpha * (0.5 + speedNorm * 0.5);
+      ctx.drawImage(tex.canvas, 0, 0, tex.canvas.width, tex.canvas.height,
+                    Math.round(p.x - tex.w / 2), Math.round(p.y - tex.w / 2), tex.w, tex.w);
+    }
+
+    ctx.globalAlpha = 1;
+
+    // Vortex visualization
+    if (!isIdle && mx > 0) {
+      const age = (now - lastMove) / 1000;
+      const fade = Math.max(0, 1 - age * 1.5);
+      if (fade > 0.01) {
+        ctx.globalAlpha = fade * 0.2;
+        const g = ctx.createRadialGradient(mx, my, 0, mx, my, 200);
+        g.addColorStop(0, 'rgba(34,211,238,0.6)');
+        g.addColorStop(1, 'rgba(34,211,238,0)');
+        ctx.fillStyle = g;
+        ctx.beginPath(); ctx.arc(Math.round(mx), Math.round(my), 200, 0, Math.PI * 2); ctx.fill();
+
+        // Spiral rings
+        ctx.globalAlpha = fade * 0.1;
+        ctx.strokeStyle = '#22d3ee';
+        ctx.lineWidth = 1;
+        for (let r = 30; r < 200; r += 30) {
+          ctx.beginPath();
+          ctx.arc(Math.round(mx), Math.round(my), r, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>
