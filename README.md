@@ -370,3 +370,11 @@ X2 QUANTUM    Radial Waves          120K     波前干涉
 5. 🎨 創作您自己的版本
 
 **祝您使用愉快！** 🎉
+
+---
+
+## License
+
+Licensed under the [MIT License](LICENSE).
+
+© 2026 Endwar116 / IMCC
